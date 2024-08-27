@@ -1,6 +1,5 @@
 #ifdef LUA_EQEMU
 
-#include "lua.hpp"
 #include <luabind/luabind.hpp>
 #include <luabind/object.hpp>
 
@@ -82,6 +81,11 @@ void Lua_Packet::SetOpcode(int op) {
 int Lua_Packet::GetRawOpcode() {
 	Lua_Safe_Call_Int();
 	return static_cast<int>(self->GetOpcodeBypass());
+}
+
+int Lua_Packet::GetProtocolOpcode() {
+	Lua_Safe_Call_Int();
+	return static_cast<int>(self->GetProtocolOpcode());
 }
 
 void Lua_Packet::SetRawOpcode(int op) {
@@ -330,6 +334,7 @@ luabind::scope lua_register_packet() {
 	.property("valid", &Lua_Packet::Valid)
 	.def("GetOpcode", &Lua_Packet::GetOpcode)
 	.def("GetRawOpcode", &Lua_Packet::GetRawOpcode)
+	.def("GetProtocolOpcode", &Lua_Packet::GetProtocolOpcode)
 	.def("GetSize", &Lua_Packet::GetSize)
 	.def("GetWritePosition", &Lua_Packet::GetWritePosition)
 	.def("ReadDouble", &Lua_Packet::ReadDouble)
@@ -365,7 +370,7 @@ luabind::scope lua_register_packet() {
 luabind::scope lua_register_packet_opcodes() {
 	return luabind::class_<Opcodes>("Opcode")
 	.enum_("constants")
-	[
+	[(
 		luabind::value("ExploreUnknown", static_cast<int>(OP_ExploreUnknown)),
 		luabind::value("Heartbeat", static_cast<int>(OP_Heartbeat)),
 		luabind::value("ReloadUI", static_cast<int>(OP_ReloadUI)),
@@ -582,7 +587,7 @@ luabind::scope lua_register_packet_opcodes() {
 		luabind::value("Logout", static_cast<int>(OP_Logout)),
 		luabind::value("LogoutReply", static_cast<int>(OP_LogoutReply)),
 		luabind::value("PreLogoutReply", static_cast<int>(OP_PreLogoutReply)),
-		luabind::value("DuelResponse2", static_cast<int>(OP_DuelResponse2)),
+		luabind::value("DuelAccept", static_cast<int>(OP_DuelAccept)),
 		luabind::value("InstillDoubt", static_cast<int>(OP_InstillDoubt)),
 		luabind::value("SafeFallSuccess", static_cast<int>(OP_SafeFallSuccess)),
 		luabind::value("DisciplineUpdate", static_cast<int>(OP_DisciplineUpdate)),
@@ -659,7 +664,7 @@ luabind::scope lua_register_packet_opcodes() {
 		luabind::value("TraderDelItem", static_cast<int>(OP_TraderDelItem)),
 		luabind::value("AdventureMerchantPurchase", static_cast<int>(OP_AdventureMerchantPurchase)),
 		luabind::value("TestBuff", static_cast<int>(OP_TestBuff)),
-		luabind::value("DuelResponse", static_cast<int>(OP_DuelResponse)),
+		luabind::value("DuelDecline", static_cast<int>(OP_DuelDecline)),
 		luabind::value("RequestDuel", static_cast<int>(OP_RequestDuel)),
 		luabind::value("BazaarInspect", static_cast<int>(OP_BazaarInspect)),
 		luabind::value("ClickDoor", static_cast<int>(OP_ClickDoor)),
@@ -838,7 +843,7 @@ luabind::scope lua_register_packet_opcodes() {
 		luabind::value("HideCorpse", static_cast<int>(OP_HideCorpse)),
 		luabind::value("TargetBuffs", static_cast<int>(OP_TargetBuffs)),
 		luabind::value("TradeBusy", static_cast<int>(OP_TradeBusy)),
-		luabind::value("GuildUpdateURLAndChannel", static_cast<int>(OP_GuildUpdateURLAndChannel)),
+		luabind::value("GuildUpdate", static_cast<int>(OP_GuildUpdate)),
 		luabind::value("CameraEffect", static_cast<int>(OP_CameraEffect)),
 		luabind::value("SpellEffect", static_cast<int>(OP_SpellEffect)),
 		luabind::value("DzQuit", static_cast<int>(OP_DzQuit)),
@@ -911,7 +916,7 @@ luabind::scope lua_register_packet_opcodes() {
 		luabind::value("ClientTimeStamp", static_cast<int>(OP_ClientTimeStamp)),
 		luabind::value("GuildPromote", static_cast<int>(OP_GuildPromote)),
 		luabind::value("Fling", static_cast<int>(OP_Fling))
-	];
+	)];
 }
 
 #endif

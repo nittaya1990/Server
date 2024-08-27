@@ -26,6 +26,8 @@
 #define SPELLBOOK_UNKNOWN 0xFFFFFFFF		//player profile spells are 32 bit
 
 //some spell IDs which will prolly change, but are needed
+#define SPELL_COMPLETE_HEAL 13
+#define SPELL_LIFEBURN 2755
 #define SPELL_LEECH_TOUCH 2766
 #define SPELL_LAY_ON_HANDS 87
 #define SPELL_HARM_TOUCH 88
@@ -163,6 +165,57 @@
 #define SPELL_PACT_OF_HATE_RECOURSE 40375
 #define SPELL_INCENDIARY_OOZE_BUFF 32513
 #define SPELL_EYE_OF_ZOMM 323
+#define SPELL_MINOR_ILLUSION 287
+#define SPELL_ILLUSION_TREE 601
+#define SPELL_ILLUSION_FEMALE 1731
+#define SPELL_ILLUSION_MALE 1732
+#define SPELL_UNSUMMON_SELF 892
+#define SPELL_ANCIENT_LIFEBANE 2115
+#define SPELL_GMHP25K 6817
+#define SPELL_GMHP50K 6818
+#define SPELL_GMHP100K 6819
+#define SPELL_GMHP225K 6820
+#define SPELL_GMHP475K 6821
+#define SPELL_GMHP925K 6822
+#define SPELL_GMHP2M 6823
+#define SPELL_GMHP3M 6824
+#define SPELL_GMHP5M 39851
+#define SPELL_GUIDE_ACTING_ONE 778
+#define SPELL_GUIDE_ALLIANCE_ONE 810
+#define SPELL_GUIDE_CANCEL_MAGIC_ONE 811
+#define SPELL_GUIDE_JOURNEY_ONE 813
+#define SPELL_GUIDE_VISION_ONE 814
+#define SPELL_GUIDE_HEALTH_ONE 815
+#define SPELL_GUIDE_INVULNERABILITY_ONE 816
+#define SPELL_GUIDE_BOLT_ONE 817
+#define SPELL_GUIDE_MEMORY_BLUR_ONE 818
+#define SPELL_GUIDE_ACTING_TWO 1209
+#define SPELL_GUIDE_CANCEL_MAGIC_TWO 1211
+#define SPELL_GUIDE_JOURNEY_TWO 1212
+#define SPELL_GUIDE_VISION_TWO 1213
+#define SPELL_GUIDE_HEALTH_TWO 1214
+#define SPELL_GUIDE_INVULNERABILITY_TWO 1215
+#define SPELL_GUIDE_BOLT_TWO 1216
+#define SPELL_GUIDE_MEMORY_BLUR_TWO 1217
+#define SPELL_GUIDE_ALLIANCE_TWO 1219
+#define SPELL_GUIDE_EVACUATION 3921
+#define SPELL_GUIDE_LEVITATION 39852
+#define SPELL_GUIDE_SPELL_HASTE 39853
+#define SPELL_GUIDE_HASTE 39854
+#define SPELL_VAMPIRIC_EMBRACE 821
+#define SPELL_VAMPIRIC_EMBRACE_OF_SHADOW 822
+#define SPELL_BATTLE_CRY 5027
+#define SPELL_WAR_CRY 5028
+#define SPELL_BATTLE_CRY_OF_DRAVEL 5029
+#define SPELL_WAR_CRY_OF_DRAVEL 5030
+#define SPELL_BATTLE_CRY_OF_THE_MASTRUQ 5031
+#define SPELL_ANCIENT_CRY_OF_CHAOS 5032
+#define SPELL_BLOODTHIRST 8476
+#define SPELL_AMPLIFICATION 2603
+#define SPELL_DIVINE_REZ 2738
+
+// discipline IDs.
+#define DISC_UNHOLY_AURA 4520
 
 //spellgroup ids
 #define SPELLGROUP_FRENZIED_BURNOUT 2754
@@ -173,8 +226,6 @@
 #define SPELLGROUP_FURIOUS_RAMPAGE 38106
 #define SPELLGROUP_SHROUD_OF_PRAYER 41050
 
-
-
 #define EFFECT_COUNT 12
 #define MAX_SPELL_TRIGGER 12	// One for each slot(only 6 for AA since AA use 2)
 #define MAX_RESISTABLE_EFFECTS 12	// Number of effects that are typcially checked agianst resists.
@@ -184,10 +235,33 @@
 #define MAX_SYMPATHETIC_PROCS 10 // Number of sympathetic procs a client can have (This is arbitrary)
 #define MAX_FOCUS_PROC_LIMIT_TIMERS 20 //Number of focus recast timers that can be going at same time (This is arbitrary)
 #define MAX_PROC_LIMIT_TIMERS 8 //Number of proc delay timers that can be going at same time, different proc types get their own timer array. (This is arbitrary)
+#define MAX_APPEARANCE_EFFECTS 20 //Up to 20 Appearance Effects can be saved to a mobs appearance effect array, these will be sent to other clients when they enter a zone (This is arbitrary)
+#define MAX_CAST_ON_SKILL_USE 36 //Actual amount is MAX/3
 
+#define MAX_INVISIBILTY_LEVEL 254
 
+//instrument item id's used as song components
+#define INSTRUMENT_HAND_DRUM 13000
+#define INSTRUMENT_WOODEN_FLUTE 13001
+#define INSTRUMENT_LUTE 13011
+#define INSTRUMENT_HORN 13012
 
-const int Z_AGGRO=10;
+//option types for the rule Spells:ResurrectionEffectBlock
+#define RES_EFFECTS_CANNOT_STACK -1
+#define NO_RES_EFFECTS_BLOCK 0
+#define RES_EFFECTS_BLOCK 1
+#define RES_EFFECTS_BLOCK_WITH_BUFFS 2
+#define MOVE_NEW_SLOT 2
+
+#define PARTIAL_DEATH_SAVE 1
+#define FULL_DEATH_SAVE 2
+
+#define MAX_FAST_HEAL_CASTING_TIME 2000
+#define MAX_VERY_FAST_HEAL_CASTING_TIME 1000
+
+#define DETRIMENTAL_EFFECT 0
+#define BENEFICIAL_EFFECT 1
+#define BENEFICIAL_EFFECT_GROUP_ONLY 2
 
 const uint32 MobAISpellRange=100; // max range of buffs
 
@@ -489,7 +563,7 @@ enum SpellRestriction
 	HAS_NO_ILLUSIONS_OF_GRANDEUR_BUFF                                         = 12519, //
 	IS_HP_ABOVE_50_PCT                                                        = 16010, //
 	IS_HP_UNDER_50_PCT                                                        = 16031, //
-	IS_OFF_HAND_EQUIPED                                                       = 27672, // You must be wielding a weapon or shield in your offhand to use this ability.
+	IS_OFF_HAND_EQUIPPED                                                       = 27672, // You must be wielding a weapon or shield in your offhand to use this ability.
 	HAS_NO_PACT_OF_FATE_RECOURSE_BUFF                                         = 29556, // This spell will not work while Pact of Fate Recourse is active. | caster restriction |
 	HAS_NO_SHROUD_OF_PRAYER_BUFF                                              = 32339, // Your target cannot receive another Quiet Prayer this soon.
 	IS_MANA_BELOW_20_PCT                                                      = 38311, // This ability requires you to be at or below 20% of your maximum mana.
@@ -500,6 +574,7 @@ enum SpellRestriction
 	IS_SUMMONED_OR_UNDEAD                                                     = 49326, //
 	IS_CLASS_CASTER_PRIEST                                                    = 49529, //
 	IS_END_OR_MANA_ABOVE_20_PCT                                               = 49543, // You must have at least 20% of your maximum mana and endurance to use this ability.	//pure melee class check end, other check mana
+	IS_END_OR_MANA_BELOW_10_PCT                                               = 49545, // 																			//pure melee class check end, other check mana, hybrid check both
 	IS_END_OR_MANA_BELOW_30_PCT                                               = 49573, // Your target already has 30% or more of their maximum mana or endurance.	//pure melee class check the, other check more
 	IS_CLASS_BARD2                                                            = 49574, //
 	IS_NOT_CLASS_BARD                                                         = 49575, //
@@ -528,6 +603,22 @@ enum ReflectSpellType
 	REFLECT_ALL_PLAYER_SPELLS         = 2,
 	RELFECT_ALL_SINGLE_TARGET_SPELLS  = 3,
 	REFLECT_ALL_SPELLS                = 4,
+};
+
+enum InvisType {
+	T_INVISIBLE						= 0,
+	T_INVISIBLE_VERSE_UNDEAD		= 1,
+	T_INVISIBLE_VERSE_ANIMAL		= 2,
+};
+
+//For better organizing in proc effects, not used in spells.
+enum ProcType
+{
+	MELEE_PROC             = 1,
+	RANGED_PROC            = 2,
+	DEFENSIVE_PROC         = 3,
+	SKILL_PROC             = 4,
+	SKILL_PROC_SUCCESS     = 5,
 };
 
 enum SpellTypes : uint32
@@ -813,7 +904,7 @@ typedef enum {
 #define SE_AlterNPCLevel				107	// implemented - not used on live
 #define SE_Familiar						108	// implemented
 #define SE_SummonItemIntoBag			109	// implemented - summons stuff into container
-//#define SE_IncreaseArchery			110	// not used
+#define SE_IncreaseArchery				110	// implemented
 #define SE_ResistAll					111	// implemented - Note: Physical Resists are not modified by this effect.
 #define SE_CastingLevel					112	// implemented
 #define	SE_SummonHorse					113	// implemented
@@ -825,7 +916,7 @@ typedef enum {
 #define SE_AttackSpeed3					119	// implemented
 #define SE_HealRate						120	// implemented - reduces healing by a %
 #define SE_ReverseDS					121 // implemented
-//#define SE_ReduceSkill				122	// not implemented    TODO: Now used on live, decreases skills by percent
+#define SE_ReduceSkill					122	// implemented - base: skill id, limit: none, max: none, formula: % skill is reduced (positive)
 #define SE_Screech						123	// implemented Spell Blocker(If have buff with value +1 will block any effect with -1)
 #define SE_ImprovedDamage				124 // implemented
 #define SE_ImprovedHeal					125 // implemented
@@ -863,7 +954,7 @@ typedef enum {
 #define SE_SpellDamageShield			157	// implemented, @DS, causes non-melee damage on caster of a spell, base: Amt DS (negative), limit: none, max: unknown (same as base but +)
 #define SE_Reflect						158 // implemented, @SpellMisc, reflect casted detrimental spell back at caster, base: chance pct, limit: resist modifier (positive value reduces resists), max: pct of base dmg mod (50=50pct of base)
 #define SE_AllStats						159	// implemented
-//#define SE_MakeDrunk					160 // *not implemented - Effect works entirely client side (Should check against tolerance)
+#define SE_MakeDrunk					160 // *not implemented - Effect works entirely client side (Should check against tolerance)
 #define SE_MitigateSpellDamage			161	// implemented, @Runes, mitigate incoming spell damage by percentage until rune fades, base: percent mitigation, limit: max dmg absorbed per hit, max: rune amt, Note: If placed on item or AA, will provide stackable percent mitigation.
 #define SE_MitigateMeleeDamage			162	// implemented - rune with max value
 #define SE_NegateAttacks				163	// implemented
@@ -896,8 +987,8 @@ typedef enum {
 #define SE_EndurancePool				190	// implemented
 #define SE_Amnesia						191	// implemented - Silence vs Melee Effect
 #define SE_Hate							192	// implemented - Instant and hate over time.
-#define SE_SkillAttack					193	// implemented
-#define SE_FadingMemories				194	// implemented
+#define SE_SkillAttack					193	// implemented,
+#define SE_FadingMemories				194	// implemented, @Aggro, Remove from hate lists and make invisible. Can set max level of NPCs that can be affected. base: success chance, limit: max level (ROF2), max: max level (modern client), Note: Support for max level requires Rule (Spells, UseFadingMemoriesMaxLevel) to be true. If used from limit field, then it set as the level, ie. max level of 75 would use limit value of 75. If set from max field, max level 75 would use max value of 1075, if you want to set it so it checks a level range above the spell target then for it to only work on mobs 5 levels or below you set max value to 5.
 #define SE_StunResist					195	// implemented
 #define SE_StrikeThrough				196	// implemented
 #define SE_SkillDamageTaken				197	// implemented
@@ -908,7 +999,7 @@ typedef enum {
 #define SE_IllusionOther				202	// implemented - Project Illusion
 #define SE_MassGroupBuff				203	// implemented
 #define SE_GroupFearImmunity			204	// implemented - (Does not use bonus)
-#define SE_Rampage						205	// implemented
+#define SE_Rampage						205	// implemented, @Combat Instant, Perform a primary slot combat rounds on all creatures within a 40 foot radius, base: number of attack rounds, limit: max entities hit per round, max: none, Note: AE range is 40 by default. Custom: Set field 'aoe_range' to override default. Adding additional attacks and hit count limit.
 #define SE_AETaunt						206	// implemented
 #define SE_FleshToBone					207	// implemented
 //#define SE_PurgePoison				208	// not used
@@ -948,7 +1039,7 @@ typedef enum {
 #define SE_IncreaseChanceMemwipe		242	// implemented - @Memblur, increases the chance to wipe hate with memory blurr, base: chance pct, limit: none, max: none, Note: Mods final blur chance after other bonuses added.
 #define SE_CharmBreakChance				243	// implemented - Total Domination
 #define	SE_RootBreakChance				244	// implemented[AA] reduce the chance that your root will break.
-#define SE_TrapCircumvention			245	// *not implemented[AA] - decreases the chance that you will set off a trap when opening a chest
+#define SE_TrapCircumvention			245	// implemented, @Traps, decreases the chance that you will set off a trap when opening a chest or other similar container by percentage, base: chance modifer, limit: none, max: none
 #define SE_SetBreathLevel				246 // *not implemented as bonus
 #define SE_RaiseSkillCap				247	// implemented[AA] - adds skill over the skill cap.
 #define SE_SecondaryForte				248 // not implemented as bonus(gives you a 2nd specialize skill that can go past 50 to 100)
@@ -984,14 +1075,14 @@ typedef enum {
 #define	SE_FinishingBlow				278 // implemented[AA] - chance to do massive damage under 10% HP (base1 = chance, base2 = damage)
 #define SE_Flurry						279	// implemented
 #define SE_PetFlurry					280 // implemented[AA]
-#define SE_FeignedMinion				281	// *not implemented[AA] ability allows you to instruct your pet to feign death via the '/pet feign' command. value = succeed chance
+#define SE_FeignedMinion				281	// implemented, ability allows you to instruct your pet to feign death via the '/pet feign' command, base: succeed chance, limit: none, max: none, Note: Only implemented as an AA.
 #define SE_ImprovedBindWound			282	// implemented[AA] - increase bind wound amount by percent.
 #define SE_DoubleSpecialAttack			283	// implemented[AA] - Chance to perform second special attack as monk
 //#define SE_LoHSetHeal					284	// not used
 #define SE_NimbleEvasion				285	// *not implemented - base1 = 100 for max
 #define SE_FcDamageAmt					286	// implemented, @Fc, On Caster, spell damage mod flat amt, base: amt
 #define SE_SpellDurationIncByTic		287 // implemented, @Fc, SPA: 287, SE_SpellDurationIncByTic,			On Caster, spell buff duration mod, base: tics
-#define SE_SkillAttackProc				288	// implemented[AA] - Chance to proc spell on skill attack usage (ex. Dragon Punch)
+#define SE_SkillAttackProc				288	// implemented, @Procs, chance to cast a spell when using a skill, base: chance, limit: skill, max: spellid, note: if used in AA the spell id is set in aa_ranks spell field, chance is calculated as 100% = value 1000.
 #define SE_CastOnFadeEffect				289 // implemented - Triggers only if fades after natural duration.
 #define SE_IncreaseRunSpeedCap			290	// implemented[AA] - increases run speed over the hard cap
 #define SE_Purify						291 // implemented, @Dispel, remove up specified amount of detiremental spells, base: amt removed, limit: none, max: none, Note: excluding charm, fear, resurrection, and revival sickness
@@ -1002,24 +1093,24 @@ typedef enum {
 #define SE_FcSpellVulnerability			296	// implemented, @Fc, On Target, spell damage taken mod pct, base: min pct, limit: max pct
 #define SE_FcDamageAmtIncoming			297 // implemetned, @Fc, On Target, damage taken flat amt, base: amt
 #define SE_ChangeHeight					298	// implemented
-#define SE_WakeTheDead					299	// implemented
+#define SE_WakeTheDead					299	// implemented, @Pets, summon one temporary pet from nearby corpses that last a set duration, base: none, limit: none, max: duration (seconds). Note: max range of corpse is 250.
 #define SE_Doppelganger					300	// implemented
 #define SE_ArcheryDamageModifier		301	// implemented[AA] - increase archery damage by percent
 #define SE_FcDamagePctCrit				302	// implemented, @Fc, On Caster, spell damage mod pct, base: min pct, limit: max pct, Note: applied after critical hits has been calculated.
 #define SE_FcDamageAmtCrit				303	// implemented, @Fc, On Caster, spell damage mod flat amt, base: amt
 #define SE_OffhandRiposteFail			304 // implemented as bonus - enemy cannot riposte offhand attacks
 #define SE_MitigateDamageShield			305 // implemented - off hand attacks only (Shielding Resistance)
-//#define SE_ArmyOfTheDead				306 // *not implemented NecroAA - This ability calls up to five shades of nearby corpses back to life to serve the necromancer. The soulless abominations will mindlessly fight the target until called back to the afterlife some time later. The first rank summons up to three shades that serve for 60 seconds, and each additional rank adds one more possible shade and increases their duration by 15 seconds
+#define SE_ArmyOfTheDead				306 // implemented, @Pets, summon multiple temporary pets from nearby corpses that last a set duration, base: amount of corpses that a pet can summon from, limit: none, max: duration (seconds). Note: max range of corpse is 250.
 //#define SE_Appraisal					307 // *not implemented Rogue AA - This ability allows you to estimate the selling price of an item you are holding on your cursor.
 #define SE_ZoneSuspendMinion			308 // implemented, @Pet, allow suspended pets to be resummoned upon zoning, base: 1, limit: none, max: none, Calc: Bool
 #define SE_GateCastersBindpoint			309 // implemented - Gate to casters bind point
 #define SE_ReduceReuseTimer				310 // implemented, @Fc, On Caster, spell and disc reuse time mod by amount, base: milliseconds
-#define SE_LimitCombatSkills			311 // implemented, @Ff, Include or exclude combat skills or procs (non-memorizable spells) from being focused, base1: 0=Exclude if proc 1=Allow only if proc
+#define SE_LimitCombatSkills			311 // implemented, @Ff, Include or exclude combat skills or procs from being focused, base1: 0=Exclude if proc 1=Allow only if proc.
 #define SE_Sanctuary					312 // implemented - Places caster at bottom hate list, effect fades if cast cast spell on targets other than self.
 #define SE_ForageAdditionalItems		313	// implemented[AA] - chance to forage additional items
 #define SE_Invisibility2				314 // implemented - fixed duration invisible
 #define SE_InvisVsUndead2				315 // implemented - fixed duration ITU
-//#define SE_ImprovedInvisAnimals		316	// not used
+#define SE_ImprovedInvisAnimals			316	// implemented
 #define SE_ItemHPRegenCapIncrease		317	// implemented[AA] - increases amount of health regen gained via items
 #define SE_ItemManaRegenCapIncrease		318 // implemented - increases amount of mana regen you can gain via items
 #define SE_CriticalHealOverTime			319 // implemented
@@ -1128,10 +1219,10 @@ typedef enum {
 #define SE_LimitUseMin					422 // implemented, @Ff Minium amount of numhits for a spell to be focused, base: numhit amt
 #define SE_LimitUseType					423 // implemented,	@Ff Focus will only affect if has this numhits type, base: numhit type
 #define SE_GravityEffect				424 // implemented - Pulls/pushes you toward/away the mob at a set pace
-//#define SE_Display					425 // *not implemented - Illusion: Flying Dragon(21626)
+#define SE_Display						425 // *not implemented - Illusion: Flying Dragon(21626)
 #define SE_IncreaseExtTargetWindow		426 // *not implmented[AA] - increases the capacity of your extended target window
-#define SE_SkillProc					427 // implemented - chance to proc when using a skill(ie taunt)
-#define SE_LimitToSkill					428 // implemented - limits what skills will effect a skill proc
+#define SE_SkillProcAttempt				427 // implemented - chance to proc when using a skill(ie taunt)
+#define SE_LimitToSkill					428 // implemented, @Procs, limits what combat skills will effect a skill proc, base: skill value, limit: none, max: none
 #define SE_SkillProcSuccess				429 // implemented - chance to proc when tje skill in use successfully fires.
 //#define SE_PostEffect					430 // *not implemented - Fear of the Dark(27641) - Alters vision
 //#define SE_PostEffectData				431 // *not implemented - Fear of the Dark(27641) - Alters vision
@@ -1166,7 +1257,7 @@ typedef enum {
 #define SE_Ff_Override_NotFocusable		460 // implemented, @Fc, Allow spell to be focused event if flagged with 'not_focusable' in spell table, base: 1
 #define SE_ImprovedDamage2				461 // implemented, @Fc, On Caster, spell damage mod pct, base: min pct, limit: max pct
 #define SE_FcDamageAmt2					462 // implemented, @Fc, On Caster, spell damage mod flat amt, base: amt
-//#define SE_Shield_Target				463 //
+#define SE_Shield_Target				463 // implemented, Base1 % damage shielded on target
 #define SE_PC_Pet_Rampage				464 // implemented - Base1 % chance to do rampage for base2 % of damage each melee round
 #define SE_PC_Pet_AE_Rampage			465 // implemented - Base1 % chance to do AE rampage for base2 % of damage each melee round
 #define SE_PC_Pet_Flurry_Chance			466 // implemented - Base1 % chance to do flurry from double attack hit.
@@ -1179,7 +1270,7 @@ typedef enum {
 #define SE_Double_Backstab_Front		473 // implemented - Chance to double backstab from front
 #define SE_Pet_Crit_Melee_Damage_Pct_Owner	474 // implemenetd - Critical damage mod applied to pets from owner
 #define SE_Trigger_Spell_Non_Item		475 // implemented - Trigger spell on cast only if not from item click.
-#define SE_Weapon_Stance				476 // implemented, @Misc, Apply a specific spell buffs automatically depending 2Hander, Shield or Duel Wield is equiped, base: spellid, base: 0=2H 1=Shield 2=DW, max: none
+#define SE_Weapon_Stance				476 // implemented, @Misc, Apply a specific spell buffs automatically depending 2Hander, Shield or Dual Wield is equipped, base: spellid, base: 0=2H 1=Shield 2=DW, max: none
 #define SE_Hatelist_To_Top_Index		477 // Implemented - Chance to be set to top of rampage list
 #define SE_Hatelist_To_Tail_Index		478 // Implemented - Chance to be set to bottom of rampage list
 #define SE_Ff_Value_Min					479 // implemented, @Ff, Minimum base value of a spell that can be focused, base: spells to be focused base1 value
@@ -1235,8 +1326,9 @@ typedef enum {
 // LAST
 
 
-#define DF_Permanent			50
-#define DF_Aura					51
+#define DF_Permanent				50
+#define DF_Aura						51
+#define PERMANENT_BUFF_DURATION 	-1000 //this is arbitrary used when overriding spells regular buff duration to set it as permenant
 
 // note this struct is historical, we don't actually need it to be
 // aligned to anything, but for maintaining it it is kept in the order that
@@ -1267,7 +1359,7 @@ struct SPDat_Spell_Struct
 /* 016 */	uint32 buff_duration_formula; // -- DURATIONBASE
 /* 017 */	uint32 buff_duration; // -- DURATIONCAP
 /* 018 */	uint32 aoe_duration;	// sentinel, rain of something -- IMPACTDURATION
-/* 019 */	uint16 mana; // Mana Used -- MANACOST
+/* 019 */	int32 mana; // Mana Used -- MANACOST
 /* 020 */	int base_value[EFFECT_COUNT];	//various purposes -- BASEAFFECT1 .. BASEAFFECT12
 /* 032 */	int limit_value[EFFECT_COUNT]; //various purposes -- BASE_EFFECT2_1 ... BASE_EFFECT2_12
 /* 044 */	int32 max_value[EFFECT_COUNT]; // -- AFFECT1CAP ... AFFECT12CAP
@@ -1279,7 +1371,7 @@ struct SPDat_Spell_Struct
 											// If it is a number between 1-4 it means components[number] is a focus and not to expend it
 											// If it is a valid itemid it means this item is a focus as well
 											// -- NOEXPENDREAGENT1 ... NOEXPENDREAGENT4
-/* 070 */	uint16 formula[EFFECT_COUNT]; // Spell's value formula -- LEVELAFFECT1MOD ... LEVELAFFECT12MOD
+/* 070 */	uint32 formula[EFFECT_COUNT]; // Spell's value formula -- LEVELAFFECT1MOD ... LEVELAFFECT12MOD
 /* 082 */	//int LightType; // probaly another effecttype flag -- LIGHTTYPE
 /* 083 */	int8 good_effect; //0=detrimental, 1=Beneficial, 2=Beneficial, Group Only -- BENEFICIAL
 /* 084 */	int activated; // probably another effecttype flag -- ACTIVATED
@@ -1291,7 +1383,7 @@ struct SPDat_Spell_Struct
 /* 101 */	int8 zone_type; // 01=Outdoors, 02=dungeons, ff=Any -- ZONETYPE
 /* 102 */	int8 environment_type; // -- ENVIRONMENTTYPE
 /* 103 */	int8 time_of_day; // -- TIMEOFDAY
-/* 104 */	uint8 classes[PLAYER_CLASS_COUNT]; // Classes, and their min levels -- WARRIORMIN ... BERSERKERMIN
+/* 104 */	uint8 classes[Class::PLAYER_CLASS_COUNT]; // Classes, and their min levels -- WARRIORMIN ... BERSERKERMIN
 /* 120 */	uint8 casting_animation; // -- CASTINGANIM
 /* 121 */	//uint8 TargetAnim; // -- TARGETANIM
 /* 122 */	//uint32 TravelType; // -- TRAVELTYPE
@@ -1341,7 +1433,7 @@ struct SPDat_Spell_Struct
 /* 181 */	int pvp_duration; // buffdurationformula for PvP -- PVP_DURATION
 /* 182 */	int pvp_duration_cap; // buffduration for PvP -- PVP_DURATION_CAP
 /* 183 */	int pcnpc_only_flag; // valid values are 0, 1 = PCs (and mercs), and 2 = NPCs (and not mercs) -- PCNPC_ONLY_FLAG
-/* 184 */	bool cast_not_standing; // this is checked in the client's EQ_Spell::IsCastWhileInvisSpell, this also blocks SE_InterruptCasting from affecting this spell -- CAST_NOT_STANDING
+/* 184 */	bool cast_not_standing; // this is checked in the client's EQ_Spell::IsCastWhileInvisSpell, this also blocks SE_InterruptCasting from affecting this spell -- CAST_NOT_STANDING (Allows casting if DA, stun, mezed, charm? fear?, damage to invul targets)
 /* 185 */	bool can_mgb; // 0=no, -1 or 1 = yes -- CAN_MGB
 /* 186 */	int dispel_flag; // -- NO_DISPELL
 /* 187 */	//int npc_category; // -- NPC_MEM_CATEGORY
@@ -1410,7 +1502,7 @@ extern int32 SPDAT_RECORDS;
 bool IsTargetableAESpell(uint16 spell_id);
 bool IsSacrificeSpell(uint16 spell_id);
 bool IsLifetapSpell(uint16 spell_id);
-bool IsMezSpell(uint16 spell_id);
+bool IsMesmerizeSpell(uint16 spell_id);
 bool IsStunSpell(uint16 spell_id);
 bool IsSlowSpell(uint16 spell_id);
 bool IsHasteSpell(uint16 spell_id);
@@ -1419,22 +1511,24 @@ bool IsPercentalHealSpell(uint16 spell_id);
 bool IsGroupOnlySpell(uint16 spell_id);
 bool IsBeneficialSpell(uint16 spell_id);
 bool IsDetrimentalSpell(uint16 spell_id);
-bool IsInvisSpell(uint16 spell_id);
+bool IsInvisibleSpell(uint16 spell_id);
 bool IsInvulnerabilitySpell(uint16 spell_id);
-bool IsCHDurationSpell(uint16 spell_id);
+bool IsCompleteHealDurationSpell(uint16 spell_id);
 bool IsPoisonCounterSpell(uint16 spell_id);
 bool IsDiseaseCounterSpell(uint16 spell_id);
 bool IsSummonItemSpell(uint16 spell_id);
 bool IsSummonSkeletonSpell(uint16 spell_id);
 bool IsSummonPetSpell(uint16 spell_id);
 bool IsSummonPCSpell(uint16 spell_id);
+bool IsPetSpell(uint16 spell_id);
 bool IsCharmSpell(uint16 spell_id);
+bool IsResurrectionSicknessSpell(uint16 spell_id);
 bool IsBlindSpell(uint16 spell_id);
-bool IsEffectHitpointsSpell(uint16 spell_id);
-bool IsReduceCastTimeSpell(uint16 spell_id);
+bool IsHealthSpell(uint16 spell_id);
+bool IsCastTimeReductionSpell(uint16 spell_id);
 bool IsIncreaseDurationSpell(uint16 spell_id);
-bool IsReduceManaSpell(uint16 spell_id);
-bool IsExtRangeSpell(uint16 spell_id);
+bool IsManaCostReductionSpell(uint16 spell_id);
+bool IsIncreaseRangeSpell(uint16 spell_id);
 bool IsImprovedHealingSpell(uint16 spell_id);
 bool IsImprovedDamageSpell(uint16 spell_id);
 bool IsAEDurationSpell(uint16 spell_id);
@@ -1442,25 +1536,23 @@ bool IsPureNukeSpell(uint16 spell_id);
 bool IsAENukeSpell(uint16 spell_id);
 bool IsPBAENukeSpell(uint16 spell_id);
 bool IsAERainNukeSpell(uint16 spell_id);
-bool IsPartialCapableSpell(uint16 spell_id);
+bool IsPartialResistableSpell(uint16 spell_id);
 bool IsResistableSpell(uint16 spell_id);
 bool IsGroupSpell(uint16 spell_id);
 bool IsTGBCompatibleSpell(uint16 spell_id);
 bool IsBardSong(uint16 spell_id);
-bool IsEffectInSpell(uint16 spellid, int effect);
-bool IsBlankSpellEffect(uint16 spellid, int effect_index);
-bool IsValidSpell(uint32 spellid);
-bool IsSummonSpell(uint16 spellid);
-bool IsEvacSpell(uint16 spellid);
-bool IsDamageSpell(uint16 spellid);
-bool IsFearSpell(uint16 spellid);
-bool IsCureSpell(uint16 spellid);
-bool BeneficialSpell(uint16 spell_id);
-bool GroupOnlySpell(uint16 spell_id);
-int GetSpellEffectIndex(uint16 spell_id, int effect);
-int CanUseSpell(uint16 spellid, int classa, int level);
-int GetMinLevel(uint16 spell_id);
-int GetSpellLevel(uint16 spell_id, int classa);
+bool IsEffectInSpell(uint16 spell_id, int effect_id);
+uint16 GetSpellTriggerSpellID(uint16 spell_id, int effect_id);
+bool IsBlankSpellEffect(uint16 spell_id, int effect_index);
+bool IsValidSpell(uint32 spell_id);
+bool IsSummonSpell(uint16 spell_id);
+bool IsDamageSpell(uint16 spell_id);
+bool IsFearSpell(uint16 spell_id);
+bool IsCureSpell(uint16 spell_id);
+bool IsHarmTouchSpell(uint16 spell_id);
+int GetSpellEffectIndex(uint16 spell_id, int effect_id);
+uint8 GetSpellMinimumLevel(uint16 spell_id);
+uint8 GetSpellLevel(uint16 spell_id, uint8 class_id);
 int CalcBuffDuration_formula(int level, int formula, int duration);
 int32 CalculatePoisonCounters(uint16 spell_id);
 int32 CalculateDiseaseCounters(uint16 spell_id);
@@ -1471,10 +1563,11 @@ bool IsDisciplineBuff(uint16 spell_id);
 bool IsDiscipline(uint16 spell_id);
 bool IsCombatSkill(uint16 spell_id);
 bool IsResurrectionEffects(uint16 spell_id);
+int8 GetSpellResurrectionSicknessCheck(uint16 spell_id_one, uint16 spell_id_two);
 bool IsRuneSpell(uint16 spell_id);
 bool IsMagicRuneSpell(uint16 spell_id);
 bool IsManaTapSpell(uint16 spell_id);
-bool IsAllianceSpellLine(uint16 spell_id);
+bool IsAllianceSpell(uint16 spell_id);
 bool IsDeathSaveSpell(uint16 spell_id);
 bool IsFullDeathSaveSpell(uint16 spell_id);
 bool IsPartialDeathSaveSpell(uint16 spell_id);
@@ -1483,10 +1576,10 @@ bool IsSuccorSpell(uint16 spell_id);
 bool IsTeleportSpell(uint16 spell_id);
 bool IsTranslocateSpell(uint16 spell_id);
 bool IsGateSpell(uint16 spell_id);
-bool IsPlayerIllusionSpell(uint16 spell_id); // seveian 2008-09-23
+bool IsIllusionSpell(uint16 spell_id);
 bool IsLDoNObjectSpell(uint16 spell_id);
-int32 GetSpellResistType(uint16 spell_id);
-int32 GetSpellTargetType(uint16 spell_id);
+int GetSpellResistType(uint16 spell_id);
+int GetSpellTargetType(uint16 spell_id);
 bool IsHealOverTimeSpell(uint16 spell_id);
 bool IsCompleteHealSpell(uint16 spell_id);
 bool IsFastHealSpell(uint16 spell_id);
@@ -1501,37 +1594,39 @@ bool IsSelfConversionSpell(uint16 spell_id);
 bool IsBuffSpell(uint16 spell_id);
 bool IsPersistDeathSpell(uint16 spell_id);
 bool IsSuspendableSpell(uint16 spell_id);
-uint32 GetMorphTrigger(uint32 spell_id);
-bool IsCastonFadeDurationSpell(uint16 spell_id);
-bool IsPowerDistModSpell(uint16 spell_id);
-uint32 GetPartialMeleeRuneReduction(uint32 spell_id);
-uint32 GetPartialMagicRuneReduction(uint32 spell_id);
-uint32 GetPartialMeleeRuneAmount(uint32 spell_id);
-uint32 GetPartialMagicRuneAmount(uint32 spell_id);
-bool NoDetrimentalSpellAggro(uint16 spell_id);
-bool IsStackableDot(uint16 spell_id);
-bool IsBardOnlyStackEffect(int effect);
-bool IsCastWhileInvis(uint16 spell_id);
-bool IsEffectIgnoredInStacking(int spa);
-bool IsFocusLimit(int spa);
-bool SpellRequiresTarget(int target_type);
-bool IsVirusSpell(int32 spell_id);
-int GetViralMinSpreadTime(int32 spell_id);
-int GetViralMaxSpreadTime(int32 spell_id);
-int GetViralSpreadRange(int32 spell_id);
-bool IsInstrumentModAppliedToSpellEffect(int32 spell_id, int effect);
-uint32 GetProcLimitTimer(int32 spell_id, int proc_type);
-
-int CalcPetHp(int levelb, int classb, int STA = 75);
-int GetSpellEffectDescNum(uint16 spell_id);
-DmgShieldType GetDamageShieldType(uint16 spell_id, int32 DSType = 0);
-bool DetrimentalSpellAllowsRest(uint16 spell_id);
-uint32 GetNimbusEffect(uint16 spell_id);
-int32 GetFuriousBash(uint16 spell_id);
+bool IsCastOnFadeDurationSpell(uint16 spell_id);
+bool IsDistanceModifierSpell(uint16 spell_id);
+int GetSpellPartialMeleeRuneReduction(uint16 spell_id);
+int GetSpellPartialMagicRuneReduction(uint16 spell_id);
+int GetSpellPartialMeleeRuneAmount(uint16 spell_id);
+int GetSpellPartialMagicRuneAmount(uint16 spell_id);
+bool IsNoDetrimentalSpellAggroSpell(uint16 spell_id);
+bool IsStackableDOT(uint16 spell_id);
+bool IsBardOnlyStackEffect(int effect_id);
+bool IsCastWhileInvisibleSpell(uint16 spell_id);
+bool IsEffectIgnoredInStacking(int effect_id);
+bool IsFocusLimit(int effect_id);
+bool IsTargetRequiredForSpell(uint16 spell_id);
+bool IsVirusSpell(uint16 spell_id);
+int GetSpellViralMinimumSpreadTime(uint16 spell_id);
+int GetSpellViralMaximumSpreadTime(uint16 spell_id);
+int GetSpellViralSpreadRange(uint16 spell_id);
+bool IsInstrumentModifierAppliedToSpellEffect(uint16 spell_id, int effect_id);
+bool IsPulsingBardSong(uint16 spell_id);
+int GetSpellProcLimitTimer(uint16 spell_id, int proc_type);
+bool IsCastNotStandingSpell(uint16 spell_id);
+int GetSpellEffectDescriptionNumber(uint16 spell_id);
+DmgShieldType GetDamageShieldType(uint16 spell_id, int damage_shield_type = 0);
+bool IsRestAllowedSpell(uint16 spell_id);
+int GetSpellNimbusEffect(uint16 spell_id);
+int GetSpellFuriousBash(uint16 spell_id);
 bool IsShortDurationBuff(uint16 spell_id);
-bool IsSpellUsableThisZoneType(uint16 spell_id, uint8 zone_type);
+bool IsSpellUsableInThisZoneType(uint16 spell_id, uint8 zone_type);
 const char *GetSpellName(uint16 spell_id);
-int GetSpellStatValue(uint32 spell_id, const char* stat_identifier, uint8 slot = 0);
-bool CastRestrictedSpell(int spellid);
+int GetSpellStatValue(uint16 spell_id, const char* stat_identifier, uint8 slot = 0);
+bool IsCastRestrictedSpell(uint16 spell_id);
+bool IsAegolismSpell(uint16 spell_id);
+bool AegolismStackingIsSymbolSpell(uint16 spell_id);
+bool AegolismStackingIsArmorClassSpell(uint16 spell_id);
 
 #endif

@@ -24,13 +24,10 @@
 #include "../common/eq_constants.h"
 #include "../common/eq_packet_structs.h"
 #include "../common/rulesys.h"
-#include "../common/skills.h"
 #include "../common/spdat.h"
-#include "../common/string_util.h"
+#include "../common/strings.h"
 #include "../common/data_verification.h"
-#include "../common/misc_functions.h"
 #include "queryserv.h"
-#include "quest_parser_collection.h"
 #include "string_ids.h"
 #include "water_map.h"
 #include "worldserver.h"
@@ -38,16 +35,8 @@
 #include "lua_parser.h"
 #include "fastmath.h"
 #include "mob.h"
-#include "npc.h"
 
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <boost/concept_check.hpp>
-
-#ifdef BOTS
 #include "bot.h"
-#endif
 
 extern QueryServ* QServ;
 extern WorldServer worldserver;
@@ -101,6 +90,12 @@ void Mob::TuneGetStats(Mob* defender, Mob *attacker)
 	Message(0, "[#Tune] Parry Chance: %.0f pct ", round(TuneGetAvoidMeleeChance(defender, attacker, DMG_PARRIED)));
 	Message(0, "[#Tune] Dodge Chance: %.0f pct ", round(TuneGetAvoidMeleeChance(defender, attacker, DMG_DODGED)));
 
+	if (defender->IsNPC())
+	{
+		Message(0, "[#Tune] NPC STAT AC: %i ", static_cast<int>(defender->CastToNPC()->GetNPCStat("ac")));
+		Message(0, "[#Tune] NPC STAT Avoidance: %i ", static_cast<int>(defender->CastToNPC()->GetNPCStat("avoidance")));
+	}
+
 	Message(0, "################################################");
 	Message(0, "[#Tune] Attacker Statistics vs Defender");
 	Message(0, "[#Tune] Attacker Name: %s", attacker->GetCleanName());
@@ -109,8 +104,13 @@ void Mob::TuneGetStats(Mob* defender, Mob *attacker)
 		Message(0, "[#Tune] Max Damage %i Min Damage %i", max_damage, min_damage);
 		Message(0, "[#Tune] Total Offense: %i ", TuneGetOffense(defender, attacker));
 		Message(0, "[#Tune] Chance to hit:  %.0f pct", round(hit_chance));
-		Message(0, "[#Tune] Accuracy: %i ", TuneGetAccuracy( defender,attacker));
+		Message(0, "[#Tune] Total Accuracy: %i ", TuneGetAccuracy( defender,attacker));
 
+		if (attacker->IsNPC())
+		{
+			Message(0, "[#Tune] NPC STAT ATK: %i ", static_cast<int>(attacker->CastToNPC()->GetNPCStat("atk")));
+			Message(0, "[#Tune] NPC STAT Accuracy: %i ", static_cast<int>(attacker->CastToNPC()->GetNPCStat("accuracy")));
+		}
 	}
 	else{
 		Message(0, "[#Tune] Can not melee this target");
@@ -535,6 +535,7 @@ void Mob::TuneGetAccuracyByHitChance(Mob* defender, Mob *attacker, float hit_cha
 
 	for (int j = 0; j < max_loop; j++)
 	{
+		tmp_hit_chance = TuneGetHitChance(defender, attacker, avoidance_override, 0, 0, loop_add_accuracy);
 
 		if (Msg >= 3)
 		{
@@ -559,20 +560,20 @@ void Mob::TuneGetAccuracyByHitChance(Mob* defender, Mob *attacker, float hit_cha
 				Message(0, "[#Tune] AVOIDANCE STAT OVERRRIDE. This is the amount of ACCURACY adjustment needed if this defender had ( %i ) raw AVOIDANCE stat", avoidance_override);
 			}
 
-			if (defender->IsNPC()) {
-				Message(0, "[#Tune] Recommended NPC ACCURACY ADJUSTMENT of ( %i ) on ' %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, defender->GetCleanName(), hit_chance, attacker->GetCleanName());
-				Message(0, "[#Tune] SET NPC 'ACCURACY' stat value = [ %i ]", loop_add_accuracy + defender->CastToNPC()->GetAccuracyRating());
+			if (attacker->IsNPC()) {
+				Message(0, "[#Tune] Recommended NPC ACCURACY ADJUSTMENT of ( %i ) on ' %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, attacker->GetCleanName(), hit_chance, defender->GetCleanName());
+				Message(0, "[#Tune] SET NPC 'ACCURACY' stat value = [ %i ]", loop_add_accuracy + attacker->CastToNPC()->GetAccuracyRating());
 				Message(0, "###################COMPLETE###################");
 			}
-			else if (defender->IsClient()) {
-				Message(0, "[#Tune] Recommended CLIENT AVOIDANCE ADJUSTMENT of ( %i ) on  %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, defender->GetCleanName(), hit_chance, attacker->GetCleanName());
+			else if (attacker->IsClient()) {
+				Message(0, "[#Tune] Recommended CLIENT ACCURACY ADJUSTMENT of ( %i ) on  %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, attacker->GetCleanName(), hit_chance, defender->GetCleanName());
 
 				if (loop_add_accuracy >= 0) {
-					Message(0, "[#Tune] OPTION1: MODIFY Client Avoidance Mod2 stat or SPA 216 Melee Accuracy (spells/items/aa) [+ %i ]", loop_add_accuracy);
+					Message(0, "[#Tune] MODIFY Client Accuracy Mod2 stat or SPA 216 Melee Accuracy (spells/items/aa) [+ %i ]", loop_add_accuracy);
 
 				}
 				else {
-					Message(0, "[#Tune] OPTION1: MODIFY Client Avoidance Mod2 stat or SPA 216 Melee Accuracy (spells/items/aa) [ %i ]", loop_add_accuracy);
+					Message(0, "[#Tune] Give Client Accuracy Mod2 stat or SPA 216 Melee Accuracy (spells/items/aa) of [ %i ]", loop_add_accuracy);
 				}
 
 				Message(0, "###################COMPLETE###################");
@@ -586,7 +587,7 @@ void Mob::TuneGetAccuracyByHitChance(Mob* defender, Mob *attacker, float hit_cha
 
 	Message(0, "###################ABORT#######################");
 	Message(0, "[#Tune] Error: Unable to find desired result for ( %.0f pct) - Increase interval (%i) AND/OR max loop value (%i) and run again.", hit_chance, interval, max_loop);
-	Message(0, "[#Tune] Parse ended at ACCURACY ADJUSTMENT of ( %i ) on ' %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, defender->GetCleanName(), hit_chance, attacker->GetCleanName());
+	Message(0, "[#Tune] Parse ended at ACCURACY ADJUSTMENT of ( %i ) on ' %s ' will result in ( %.0f pct ) chance to hit ' %s '.", loop_add_accuracy, attacker->GetCleanName(), hit_chance, defender->GetCleanName());
 	Message(0, "###################COMPLETE###################");
 }
 
@@ -594,7 +595,7 @@ void Mob::TuneGetAccuracyByHitChance(Mob* defender, Mob *attacker, float hit_cha
 	Tune support functions
 */
 
-int Mob::TuneClientGetMeanDamage(Mob* other, int ac_override, int atk_override, int add_ac, int add_atk)
+int64 Mob::TuneClientGetMeanDamage(Mob* other, int ac_override, int atk_override, int add_ac, int add_atk)
 {
 	uint32 total_damage = 0;
 	int loop_max = 1000;
@@ -612,7 +613,7 @@ int Mob::TuneClientGetMeanDamage(Mob* other, int ac_override, int atk_override, 
 	return(total_damage / loop_max);
 }
 
-int Mob::TuneClientGetMaxDamage(Mob* other)
+int64 Mob::TuneClientGetMaxDamage(Mob* other)
 {
 	uint32 max_hit = 0;
 	uint32 current_hit = 0;
@@ -634,7 +635,7 @@ int Mob::TuneClientGetMaxDamage(Mob* other)
 	return(max_hit);
 }
 
-int Mob::TuneClientGetMinDamage(Mob* other, int max_hit)
+int64 Mob::TuneClientGetMinDamage(Mob* other, int max_hit)
 {
 	uint32 min_hit = max_hit;
 	uint32 current_hit = 0;
@@ -676,7 +677,7 @@ float Mob::TuneGetACMitigationPct(Mob* defender, Mob *attacker) {
 	return tmp_pct_mitigated;
 }
 
-int Mob::TuneGetOffense(Mob* defender, Mob *attacker, int atk_override)
+int64 Mob::TuneGetOffense(Mob* defender, Mob *attacker, int atk_override)
 {
 	int offense_rating = 0;
 	if (attacker->IsClient()) {
@@ -688,7 +689,7 @@ int Mob::TuneGetOffense(Mob* defender, Mob *attacker, int atk_override)
 	return offense_rating;
 }
 
-int Mob::TuneGetAccuracy(Mob* defender, Mob *attacker, int accuracy_override, int add_accuracy)
+int64 Mob::TuneGetAccuracy(Mob* defender, Mob *attacker, int accuracy_override, int add_accuracy)
 {
 	int accuracy = 0;
 	if (attacker->IsClient()) {
@@ -700,7 +701,7 @@ int Mob::TuneGetAccuracy(Mob* defender, Mob *attacker, int accuracy_override, in
 	return accuracy;
 }
 
-int Mob::TuneGetAvoidance(Mob* defender, Mob *attacker, int avoidance_override, int add_avoidance)
+int64 Mob::TuneGetAvoidance(Mob* defender, Mob *attacker, int avoidance_override, int add_avoidance)
 {
 	return defender->TuneGetTotalDefense(avoidance_override, add_avoidance);
 }
@@ -759,7 +760,7 @@ float Mob::TuneGetAvoidMeleeChance(Mob* defender, Mob *attacker, int type)
 	return chance;
 }
 
-int Mob::TuneCalcEvasionBonus(int final_avoidance, int base_avoidance) {
+int64 Mob::TuneCalcEvasionBonus(int final_avoidance, int base_avoidance) {
 
 	/*
 	float eb = static_cast<float>(final_avoidance) / static_cast<float>(base_avoidance);
@@ -771,11 +772,11 @@ int Mob::TuneCalcEvasionBonus(int final_avoidance, int base_avoidance) {
 	return eb;
 	*/
 
-	int loop_max = 3000;
+	int loop_max = 5000;
 	int evasion_bonus = 10;
 	int current_avoidance = 0;
 
-	int interval = 5;
+	int interval = 1;
 
 	if (base_avoidance > final_avoidance)
 	{
@@ -803,7 +804,7 @@ int Mob::TuneCalcEvasionBonus(int final_avoidance, int base_avoidance) {
 	Calculate from modified attack.cpp functions.
 */
 
-int Mob::TuneNPCAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_chance_bonus, int ac_override, int atk_override, int add_ac, int add_atk, bool get_offense, bool get_accuracy,
+int64 Mob::TuneNPCAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_chance_bonus, int ac_override, int atk_override, int add_ac, int add_atk, bool get_offense, bool get_accuracy,
 	int avoidance_override, int accuracy_override, int add_avoidance, int add_accuracy)
 {
 	if (!IsNPC()) {
@@ -831,7 +832,7 @@ int Mob::TuneNPCAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_ch
 	OffHandAtk(false);
 
 	uint8 otherlevel = other->GetLevel();
-	uint8 mylevel = this->GetLevel();
+	uint8 mylevel = GetLevel();
 
 	otherlevel = otherlevel ? otherlevel : 1;
 	mylevel = mylevel ? mylevel : 1;
@@ -862,7 +863,7 @@ int Mob::TuneNPCAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_ch
 	return my_hit.damage_done;
 }
 
-int Mob::TuneClientAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_chance_bonus, int ac_override, int atk_override, int add_ac, int add_atk, bool get_offense, bool get_accuracy,
+int64 Mob::TuneClientAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit_chance_bonus, int ac_override, int atk_override, int add_ac, int add_atk, bool get_offense, bool get_accuracy,
 	int avoidance_override, int accuracy_override, int add_avoidance, int add_accuracy)
 {
 	if (!IsClient()) {
@@ -894,8 +895,7 @@ int Mob::TuneClientAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit
 	// Now figure out damage
 	my_hit.damage_done = 1;
 	my_hit.min_damage = 0;
-	uint8 mylevel = GetLevel() ? GetLevel() : 1;
-	uint32 hate = 0;
+	int64 hate = 0;
 	if (weapon)
 		hate = (weapon->GetItem()->Damage + weapon->GetItem()->ElemDmgAmt);
 
@@ -911,7 +911,7 @@ int Mob::TuneClientAttack(Mob* other, bool no_avoid, bool no_hit_chance, int hit
 		if (Hand == EQ::invslot::slotPrimary || Hand == EQ::invslot::slotSecondary)
 			my_hit.base_damage = CastToClient()->DoDamageCaps(my_hit.base_damage);
 		auto shield_inc = spellbonuses.ShieldEquipDmgMod + itembonuses.ShieldEquipDmgMod + aabonuses.ShieldEquipDmgMod;
-		if (shield_inc > 0 && HasShieldEquiped() && Hand == EQ::invslot::slotPrimary) {
+		if (shield_inc > 0 && HasShieldEquipped() && Hand == EQ::invslot::slotPrimary) {
 			my_hit.base_damage = my_hit.base_damage * (100 + shield_inc) / 100;
 			hate = hate * (100 + shield_inc) / 100;
 		}
@@ -988,7 +988,7 @@ void Mob::TuneDoAttack(Mob *other, DamageHitInfo &hit, ExtraAttackOptions *opts,
 			other->TuneMeleeMitigation(this, hit, ac_override, add_ac);
 			if (hit.damage_done > 0) {
 				ApplyDamageTable(hit);
-				CommonOutgoingHitSuccess(other, hit, opts);
+				TuneCommonOutgoingHitSuccess(other, hit, opts);
 			}
 			LogCombat("Final damage after all reductions: [{}]", hit.damage_done);
 		}
@@ -1012,40 +1012,64 @@ void Mob::TuneMeleeMitigation(Mob *attacker, DamageHitInfo &hit, int ac_override
 
 	auto roll = RollD20(hit.offense, mitigation);
 
+	// Add bonus to roll if level difference is sufficient
+	const int level_diff            = attacker->GetLevel() - GetLevel();
+	const int level_diff_roll_check = RuleI(Combat, LevelDifferenceRollCheck);
+
+	if (level_diff_roll_check >= 0) {
+		if (level_diff > level_diff_roll_check) {
+			roll += RuleR(Combat, LevelDifferenceRollBonus);
+
+			if (roll > 2.0f) {
+				roll = 2.0f;
+			}
+		} else if (level_diff < (-level_diff_roll_check)) {
+			roll -= RuleR(Combat, LevelDifferenceRollBonus);
+
+			if (roll < 0.1f) {
+				roll = 0.1f;
+			}
+		}
+	}
+
 	// +0.5 for rounding, min to 1 dmg
 	hit.damage_done = std::max(static_cast<int>(roll * static_cast<double>(hit.base_damage) + 0.5), 1);
-
-	//Shout("mitigation %d vs offense %d. base %d rolled %f damage %d", mitigation, hit.offense, hit.base_damage, roll, hit.damage_done);
 }
 
-int Mob::TuneACSum(bool skip_caps, int ac_override, int add_ac)
+int64 Mob::TuneACSum(bool skip_caps, int ac_override, int add_ac)
 {
 	int ac = 0; // this should be base AC whenever shrouds come around
 	ac += itembonuses.AC; // items + food + tribute
 
 	if (IsClient()) {
-		ac = ac_override;
-		ac += add_ac;
+		if (ac_override) {
+			ac = ac_override;
+		}
+		if (add_ac) {
+			ac += add_ac;
+		}
 	}
 
 	int shield_ac = 0;
-	if (HasShieldEquiped() && IsClient()) {
-		auto client = CastToClient();
-		auto inst = client->GetInv().GetItem(EQ::invslot::slotSecondary);
+	if (HasShieldEquipped() && IsOfClientBot()) {
+		auto inst = (IsClient()) ? GetInv().GetItem(EQ::invslot::slotSecondary) : CastToBot()->GetBotItem(EQ::invslot::slotSecondary);
 		if (inst) {
-			if (inst->GetItemRecommendedLevel(true) <= GetLevel())
+			if (inst->GetItemRecommendedLevel(true) <= GetLevel()) {
 				shield_ac = inst->GetItemArmorClass(true);
-			else
-				shield_ac = client->CalcRecommendedLevelBonus(GetLevel(), inst->GetItemRecommendedLevel(true), inst->GetItemArmorClass(true));
+			} else {
+				shield_ac = CalcRecommendedLevelBonus(GetLevel(), inst->GetItemRecommendedLevel(true),inst->GetItemArmorClass(true));
+			}
 		}
-		shield_ac += client->GetHeroicSTR() / 10;
+		shield_ac += itembonuses.heroic_str_shield_ac;
 	}
 	// EQ math
 	ac = (ac * 4) / 3;
+
 	// anti-twink
 	if (!skip_caps && IsClient() && GetLevel() < RuleI(Combat, LevelToStopACTwinkControl))
 		ac = std::min(ac, 25 + 6 * GetLevel());
 	ac = std::max(0, ac + GetClassRaceACBonus());
+
 	if (IsNPC()) {
 		// This is the developer tweaked number
 		// for the VAST amount of NPCs in EQ this number didn't exceed 600 until recently (PoWar)
@@ -1064,14 +1088,14 @@ int Mob::TuneACSum(bool skip_caps, int ac_override, int add_ac)
 		ac += GetPetACBonusFromOwner();
 		auto spell_aa_ac = aabonuses.AC + spellbonuses.AC;
 		ac += GetSkill(EQ::skills::SkillDefense) / 5;
-		if (EQ::ValueWithin(static_cast<int>(GetClass()), NECROMANCER, ENCHANTER))
+		if (EQ::ValueWithin(static_cast<int>(GetClass()), Class::Necromancer, Class::Enchanter))
 			ac += spell_aa_ac / 3;
 		else
 			ac += spell_aa_ac / 4;
 	}
 	else { // TODO: so we can't set NPC skills ... so the skill bonus ends up being HUGE so lets nerf them a bit
 		auto spell_aa_ac = aabonuses.AC + spellbonuses.AC;
-		if (EQ::ValueWithin(static_cast<int>(GetClass()), NECROMANCER, ENCHANTER))
+		if (EQ::ValueWithin(static_cast<int>(GetClass()), Class::Necromancer, Class::Enchanter))
 			ac += GetSkill(EQ::skills::SkillDefense) / 2 + spell_aa_ac / 3;
 		else
 			ac += GetSkill(EQ::skills::SkillDefense) / 3 + spell_aa_ac / 4;
@@ -1093,16 +1117,11 @@ int Mob::TuneACSum(bool skip_caps, int ac_override, int add_ac)
 			auto over_cap = ac - softcap;
 			ac = softcap + (over_cap * returns);
 		}
-		//Shout("ACSum ac %i softcap %i returns %.2f", ac, softcap, static_cast<float>(returns));
 	}
-	else {
-		//Shout("ACSum ac %i", ac);
-	}
-
 	return ac;
 }
 
-int Mob::Tuneoffense(EQ::skills::SkillType skill, int atk_override, int add_atk)
+int64 Mob::Tuneoffense(EQ::skills::SkillType skill, int atk_override, int add_atk)
 {
 	int offense = GetSkill(skill);
 	int stat_bonus = GetSTR();
@@ -1125,17 +1144,28 @@ int Mob::Tuneoffense(EQ::skills::SkillType skill, int atk_override, int add_atk)
 		break;
 	}
 
-	if (stat_bonus >= 75)
+	if (stat_bonus >= 75) {
 		offense += (2 * stat_bonus - 150) / 3;
+	}
 
 	int32 tune_atk = GetATK();
+
+	// GetATK() = ATK + itembonuses.ATK + spellbonuses.ATK.  However, ATK appears to already be itembonuses.ATK + spellbonuses.ATK for PCs, so as is, it is double counting attack
+	// This causes attack to be significantly more important than it should be based on era rule of thumbs.  I do not want to change the GetATK() function in case doing so breaks something,
+	// so instead I am just adding a /2 to remedy the double counting.  NPCs do not have this issue, so they are broken up.
+	// PCAttackPowerScaling is used to help bring attack power further in line with era estimates.
+	if (IsOfClientBotMerc()) {
+		offense += (GetATK() / 2 + GetPetATKBonusFromOwner()) * RuleI(Combat, PCAttackPowerScaling) / 100;
+	} else {
+		offense += GetATK();
+	}
+
 	if (atk_override) {
 		tune_atk = atk_override;
 	}
 
 	tune_atk += add_atk;
 
-	offense += tune_atk + GetPetATKBonusFromOwner();
 	return offense;
 }
 
@@ -1224,7 +1254,7 @@ EQ::skills::SkillType Mob::TuneAttackAnimation(int Hand, const EQ::ItemInstance*
 	return skillinuse;
 }
 
-int Mob::Tunecompute_tohit(EQ::skills::SkillType skillinuse, int accuracy_override, int add_accuracy)
+int64 Mob::Tunecompute_tohit(EQ::skills::SkillType skillinuse, int accuracy_override, int add_accuracy)
 {
 	int tohit = GetSkill(EQ::skills::SkillOffense) + 7;
 	tohit += GetSkill(skillinuse);
@@ -1238,7 +1268,7 @@ int Mob::Tunecompute_tohit(EQ::skills::SkillType skillinuse, int accuracy_overri
 		tohit += add_accuracy;
 	}
 	if (IsClient()) {
-		double reduction = CastToClient()->m_pp.intoxication / 2.0;
+		double reduction = CastToClient()->GetIntoxication() / 2.0;
 		if (reduction > 20.0) {
 			reduction = std::min((110 - reduction) / 100.0, 1.0);
 			tohit = reduction * static_cast<double>(tohit);
@@ -1251,7 +1281,7 @@ int Mob::Tunecompute_tohit(EQ::skills::SkillType skillinuse, int accuracy_overri
 }
 
 // return -1 in cases that always hit
-int Mob::TuneGetTotalToHit(EQ::skills::SkillType skill, int chance_mod, int accuracy_override, int add_accuracy)
+int64 Mob::TuneGetTotalToHit(EQ::skills::SkillType skill, int chance_mod, int accuracy_override, int add_accuracy)
 {
 	if (chance_mod >= 10000) // override for stuff like SE_SkillAttack
 		return -1;
@@ -1268,8 +1298,15 @@ int Mob::TuneGetTotalToHit(EQ::skills::SkillType skill, int chance_mod, int accu
 	// unsure on the stacking order of these effects, rather hard to parse
 	// item mod2 accuracy isn't applied to range? Theory crafting and parses back it up I guess
 	// mod2 accuracy -- flat bonus
-	if (skill != EQ::skills::SkillArchery && skill != EQ::skills::SkillThrowing)
+	if (skill != EQ::skills::SkillArchery && skill != EQ::skills::SkillThrowing) {
 		accuracy += itembonuses.HitChance;
+	} else {
+		// Applying a scale factor as sources suggest Accuracy should reduce number of missing by 0.1% per point, so 150 = 15% reduction in misses.
+		// Based on my calculator 150 Accuracy was reducing misses by too much (closer to 20%)
+		// NOTE: This doesn't mean if you have a 30% miss chance you now miss 15%.  It means if you have a 30% miss chance you now have a 30% * (100% - 15%) = 30% * 85% = 25.5% miss chance
+		// Using same scale factor for Avoidance and Accuracy since they impact the formula about the same.
+		accuracy += itembonuses.HitChance * RuleI(Combat, PCAccuracyAvoidanceMod2Scale) / 100;
+	}
 
 	//518 Increase ATK accuracy by percentage, stackable
 	auto atkhit_bonus = itembonuses.Attack_Accuracy_Max_Percent + aabonuses.Attack_Accuracy_Max_Percent + spellbonuses.Attack_Accuracy_Max_Percent;
@@ -1306,12 +1343,17 @@ int Mob::TuneGetTotalToHit(EQ::skills::SkillType skill, int chance_mod, int accu
 		aabonuses.HitChanceEffect[skill] +
 		spellbonuses.HitChanceEffect[skill];
 
+	if (skill == EQ::skills::SkillArchery) {
+		hit_bonus += spellbonuses.increase_archery + aabonuses.increase_archery + itembonuses.increase_archery;
+		hit_bonus -= hit_bonus * RuleR(Combat, ArcheryHitPenalty);
+	}
+
 	accuracy = (accuracy * (100 + hit_bonus)) / 100;
 	return accuracy;
 }
 
 // return -1 in cases that always miss
-int Mob::TuneGetTotalDefense(int avoidance_override, int add_avoidance)
+int64 Mob::TuneGetTotalDefense(int avoidance_override, int add_avoidance)
 {
 	auto avoidance = Tunecompute_defense(avoidance_override, add_avoidance) + 10; // add 10 in case the NPC's stats are fucked
 	auto evasion_bonus = spellbonuses.AvoidMeleeChanceEffect; // we check this first since it has a special case
@@ -1336,38 +1378,50 @@ int Mob::TuneGetTotalDefense(int avoidance_override, int add_avoidance)
 	return avoidance;
 }
 
-int Mob::Tunecompute_defense(int avoidance_override, int add_avoidance)
+int64 Mob::Tunecompute_defense(int avoidance_override, int add_avoidance)
 {
 	int defense = GetSkill(EQ::skills::SkillDefense) * 400 / 225;
-	defense += (8000 * (GetAGI() - 40)) / 36000;
-	if (IsClient()) {
-		if (avoidance_override) {
-			defense = avoidance_override;
+
+	// In new code, AGI becomes a large contributor to avoidance at low levels, since AGI isn't capped by Level but Defense is
+	// A scale factor is implemented for PCs to reduce the effect of AGI at low levels.  This isn't applied to NPCs since they can be
+	// easily controlled via the Database.
+	if (RuleB(Combat, LegacyComputeDefense)) {
+		int agi_scale_factor = 1000;
+
+		if (IsOfClientBot()) {
+			agi_scale_factor = std::min(1000, static_cast<int>(GetLevel()) * 1000 / 70); // Scales Agi Contribution for PC's Level, max Contribution at Level 70
 		}
-		else {
-			defense += CastToClient()->GetHeroicAGI() / 10;
+
+		defense += agi_scale_factor * (800 * (GetAGI() - 40)) / 3600 / 1000;
+
+		if (IsOfClientBot()) {
+			defense += GetHeroicAGI() / 10;
 		}
-		defense += add_avoidance; //1 pt = 10 heroic agi
+
+		defense += itembonuses.AvoidMeleeChance * RuleI(Combat, PCAccuracyAvoidanceMod2Scale) / 100; // item mod2
+	} else {
+		defense += (8000 * (GetAGI() - 40)) / 36000;
+
+		if (IsOfClientBot()) {
+			defense += itembonuses.heroic_agi_avoidance;
+		}
+
+		defense += itembonuses.AvoidMeleeChance; // item mod2
 	}
+
 
 	//516 SE_AC_Mitigation_Max_Percent
 	auto ac_bonus = itembonuses.AC_Mitigation_Max_Percent + aabonuses.AC_Mitigation_Max_Percent + spellbonuses.AC_Mitigation_Max_Percent;
-	if (ac_bonus)
+	if (ac_bonus) {
 		defense += round(static_cast<double>(defense) * static_cast<double>(ac_bonus) * 0.0001);
+	}
 
-	defense += itembonuses.AvoidMeleeChance; // item mod2
 	if (IsNPC()) {
-		if (avoidance_override) {
-			defense += avoidance_override;
-		}
-		else {
-			defense += CastToNPC()->GetAvoidanceRating();
-		}
-		defense += add_avoidance;
+		defense += CastToNPC()->GetAvoidanceRating();
 	}
 
 	if (IsClient()) {
-		double reduction = CastToClient()->m_pp.intoxication / 2.0;
+		double reduction = CastToClient()->GetIntoxication() / 2.0;
 		if (reduction > 20.0) {
 			reduction = std::min((110 - reduction) / 100.0, 1.0);
 			defense = reduction * static_cast<double>(defense);
@@ -1384,7 +1438,6 @@ bool Mob::TuneCheckHitChance(Mob* other, DamageHitInfo &hit, int avoidance_overr
 
 	Mob *attacker = other;
 	Mob *defender = this;
-	//Shout("CheckHitChance(%s) attacked by %s", defender->GetName(), attacker->GetName());
 
 	if (defender->IsClient() && defender->CastToClient()->IsSitting())
 		return true;
@@ -1402,10 +1455,134 @@ bool Mob::TuneCheckHitChance(Mob* other, DamageHitInfo &hit, int avoidance_overr
 	// Then your chance to simply avoid the attack is checked (defender's avoidance roll beat the attacker's accuracy roll.)
 	int tohit_roll = zone->random.Roll0(accuracy);
 	int avoid_roll = zone->random.Roll0(avoidance);
-	//Shout("CheckHitChance accuracy(%d => %d) avoidance(%d => %d)", accuracy, tohit_roll, avoidance, avoid_roll);
 
 	// tie breaker? Don't want to be biased any one way
 	if (tohit_roll == avoid_roll)
 		return zone->random.Roll(50);
 	return tohit_roll > avoid_roll;
+}
+
+void Mob::TuneCommonOutgoingHitSuccess(Mob* defender, DamageHitInfo &hit, ExtraAttackOptions *opts)
+{
+	if (!defender)
+		return;
+
+#ifdef LUA_EQEMU
+	bool ignoreDefault = false;
+	LuaParser::Instance()->CommonOutgoingHitSuccess(this, defender, hit, opts, ignoreDefault);
+
+	if (ignoreDefault) {
+		return;
+	}
+#endif
+
+	// BER weren't parsing the halving
+	if (hit.skill == EQ::skills::SkillArchery ||
+		(hit.skill == EQ::skills::SkillThrowing && GetClass() != Class::Berserker))
+		hit.damage_done /= 2;
+
+	if (hit.damage_done < 1)
+		hit.damage_done = 1;
+
+	if (hit.skill == EQ::skills::SkillArchery) {
+		int bonus = aabonuses.ArcheryDamageModifier + itembonuses.ArcheryDamageModifier + spellbonuses.ArcheryDamageModifier;
+		hit.damage_done += hit.damage_done * bonus / 100;
+		int headshot = TryHeadShot(defender, hit.skill);
+		if (headshot > 0) {
+			hit.damage_done = headshot;
+		}
+		else if (GetClass() == Class::Ranger && GetLevel() > 50) { // no double dmg on headshot
+			if ((defender->IsNPC() && !defender->IsMoving() && !defender->IsRooted()) || !RuleB(Combat, ArcheryBonusRequiresStationary)) {
+				hit.damage_done *= 2;
+				MessageString(Chat::MeleeCrit, BOW_DOUBLE_DAMAGE);
+			}
+		}
+	}
+
+	int extra_mincap = 0;
+	int min_mod = hit.base_damage * GetMeleeMinDamageMod_SE(hit.skill) / 100;
+	if (hit.skill == EQ::skills::SkillBackstab) {
+		extra_mincap = GetLevel() < 7 ? 7 : GetLevel();
+		if (GetLevel() >= 60)
+			extra_mincap = GetLevel() * 2;
+		else if (GetLevel() > 50)
+			extra_mincap = GetLevel() * 3 / 2;
+		if (IsSpecialAttack(eSpecialAttacks::ChaoticStab)) {
+			hit.damage_done = extra_mincap;
+		}
+		else {
+			int ass = TryAssassinate(defender, hit.skill);
+			if (ass > 0)
+				hit.damage_done = ass;
+		}
+	}
+	else if (hit.skill == EQ::skills::SkillFrenzy && GetClass() == Class::Berserker && GetLevel() > 50) {
+		extra_mincap = 4 * GetLevel() / 5;
+	}
+
+	// this has some weird ordering
+	// Seems the crit message is generated before some of them :P
+
+	// worn item +skill dmg, SPA 220, 418. Live has a normalized version that should be here too
+	hit.min_damage += GetSkillDmgAmt(hit.skill) + GetPositionalDmgAmt(defender);
+
+	// shielding mod2
+	if (defender->itembonuses.MeleeMitigation)
+		hit.min_damage -= hit.min_damage * defender->itembonuses.MeleeMitigation / 100;
+
+	ApplyMeleeDamageMods(hit.skill, hit.damage_done, defender, opts);
+	min_mod = std::max(min_mod, extra_mincap);
+	if (min_mod && hit.damage_done < min_mod) // SPA 186
+		hit.damage_done = min_mod;
+
+	hit.damage_done += hit.min_damage;
+	if (IsOfClientBot()) {
+		int extra = 0;
+		switch (hit.skill) {
+			case EQ::skills::SkillThrowing:
+			case EQ::skills::SkillArchery:
+				extra = itembonuses.heroic_dex_ranged_damage;
+				break;
+			default:
+				extra = itembonuses.heroic_str_melee_damage;
+				break;
+		}
+		hit.damage_done += extra;
+	}
+
+	// this appears where they do special attack dmg mods
+	int spec_mod = 0;
+	if (IsSpecialAttack(eSpecialAttacks::Rampage)) {
+		int mod = GetSpecialAbilityParam(SpecialAbility::Rampage, 2);
+		if (mod > 0)
+			spec_mod = mod;
+		if ((IsPet() || IsTempPet()) && IsPetOwnerClient()) {
+			//SE_PC_Pet_Rampage SPA 464 on pet, damage modifier
+			int spell_mod = spellbonuses.PC_Pet_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD] + itembonuses.PC_Pet_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD] + aabonuses.PC_Pet_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD];
+			if (spell_mod > spec_mod)
+				spec_mod = spell_mod;
+		}
+	}
+	else if (IsSpecialAttack(eSpecialAttacks::AERampage)) {
+		int mod = GetSpecialAbilityParam(SpecialAbility::AreaRampage, 2);
+		if (mod > 0)
+			spec_mod = mod;
+		if ((IsPet() || IsTempPet()) && IsPetOwnerClient()) {
+			//SE_PC_Pet_AE_Rampage SPA 465 on pet, damage modifier
+			int spell_mod = spellbonuses.PC_Pet_AE_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD] + itembonuses.PC_Pet_AE_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD] + aabonuses.PC_Pet_AE_Rampage[SBIndex::PET_RAMPAGE_DMG_MOD];
+			if (spell_mod > spec_mod)
+				spec_mod = spell_mod;
+		}
+	}
+	if (spec_mod > 0)
+		hit.damage_done = (hit.damage_done * spec_mod) / 100;
+
+	int pct_damage_reduction = defender->GetSkillDmgTaken(hit.skill, opts) + defender->GetPositionalDmgTaken(this);
+
+	hit.damage_done += (hit.damage_done * pct_damage_reduction / 100) + defender->GetPositionalDmgTakenAmt(this);
+
+	if (defender->GetShielderID()) {
+		DoShieldDamageOnShielder(defender, hit.damage_done, hit.skill);
+		hit.damage_done -= hit.damage_done * defender->GetShieldTargetMitigation() / 100; //Default shielded takes 50 pct damage
+	}
 }

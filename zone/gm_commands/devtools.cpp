@@ -3,18 +3,19 @@
 
 void command_devtools(Client *c, const Seperator *sep)
 {
-	std::string dev_tools_key = StringFormat("%i-dev-tools-disabled", c->AccountID());
-
-	/**
-	 * Handle window toggle
-	 */
-	if (strcasecmp(sep->arg[1], "disable") == 0) {
-		DataBucket::SetData(dev_tools_key, "true");
-		c->SetDevToolsEnabled(false);
+	const uint16 arguments = sep->argnum;
+	if (arguments != 2) {
+		c->ShowDevToolsMenu();
+		return;
 	}
-	if (strcasecmp(sep->arg[1], "enable") == 0) {
-		DataBucket::DeleteData(dev_tools_key);
-		c->SetDevToolsEnabled(true);
+
+	const std::string& type = sep->arg[1];
+	const bool toggle = Strings::ToBool(sep->arg[2]);
+
+	if (Strings::EqualFold(type, "menu")) {
+		c->SetDevToolsEnabled(toggle);
+	} else if (Strings::EqualFold(type, "window")) {
+		c->SetDisplayMobInfoWindow(toggle);
 	}
 
 	c->ShowDevToolsMenu();

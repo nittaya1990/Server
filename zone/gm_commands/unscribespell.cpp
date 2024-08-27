@@ -1,62 +1,57 @@
 #include "../client.h"
+#include "../../common/data_verification.h"
 
 void command_unscribespell(Client *c, const Seperator *sep)
 {
-	uint16 spell_id  = 0;
-	uint16 book_slot = -1;
-	Client *t        = c;
+	const auto arguments = sep->argnum;
+	if (!arguments || !sep->IsNumber(1)) {
+		c->Message(Chat::White, "Usage: #unscribespell [Spell ID] - Unscribe a spell from your or your target's spell book by Spell ID");
+		return;
+	}
 
+	auto t = c;
 	if (c->GetTarget() && c->GetTarget()->IsClient() && c->GetGM()) {
 		t = c->GetTarget()->CastToClient();
 	}
 
-	if (!sep->arg[1][0]) {
-		c->Message(Chat::White, "FORMAT: #unscribespell <spellid>");
+	const uint16 spell_id = EQ::Clamp(Strings::ToInt(sep->arg[1]), 0, 65535);
+
+	if (!IsValidSpell(spell_id)) {
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"Spell ID {} could not be found.",
+				spell_id
+			).c_str()
+		);
 		return;
 	}
 
-	spell_id = atoi(sep->arg[1]);
+	auto spell_name = GetSpellName(spell_id);
 
-	if (IsValidSpell(spell_id)) {
-		book_slot = t->FindSpellBookSlotBySpellID(spell_id);
+	if (t->HasSpellScribed(spell_id)) {
+		t->UnscribeSpellBySpellID(spell_id);
 
-		if (book_slot >= 0) {
-			t->UnscribeSpell(book_slot);
-
-			t->Message(Chat::White, "Unscribing spell: %s (%i) from spellbook.", spells[spell_id].name, spell_id);
-
-			if (t != c) {
-				c->Message(
-					Chat::White,
-					"Unscribing spell: %s (%i) for %s.",
-					spells[spell_id].name,
-					spell_id,
-					t->GetName());
-			}
-
-			LogInfo("Unscribe spell: [{}] ([{}]) request for [{}] from [{}]",
-					spells[spell_id].name,
-					spell_id,
-					t->GetName(),
-					c->GetName());
-		}
-		else {
-			t->Message(
-				Chat::Red,
-				"Unable to unscribe spell: %s (%i) from your spellbook. This spell is not scribed.",
-				spells[spell_id].name,
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"Unscribing {} ({}) from {}.",
+				spell_name,
+				spell_id,
+				c->GetTargetDescription(t, TargetDescriptionType::LCSelf)
+			).c_str()
+		);
+	} else {
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"{} {} not have {} ({}) scribed.",
+				c->GetTargetDescription(t, TargetDescriptionType::UCYou),
+				c == t ? "do" : "does",
+				spell_name,
 				spell_id
-			);
-
-			if (t != c) {
-				c->Message(
-					Chat::Red,
-					"Unable to unscribe spell: %s (%i) for %s due to spell not scribed.",
-					spells[spell_id].name,
-					spell_id,
-					t->GetName());
-			}
-		}
+			).c_str()
+		);
 	}
 }
 

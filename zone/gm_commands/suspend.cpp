@@ -1,101 +1,104 @@
 #include "../client.h"
 #include "../worldserver.h"
+#include "../../common/repositories/account_repository.h"
 
 extern WorldServer worldserver;
 
 void command_suspend(Client *c, const Seperator *sep)
 {
-	if ((sep->arg[1][0] == 0) || (sep->arg[2][0] == 0)) {
+	const uint16 arguments = sep->argnum;
+	if (arguments < 2 || !sep->IsNumber(2)) {
+		c->Message(Chat::White, "Usage: #suspend [Character Name] [Days] [Reason]");
+		c->Message(Chat::White, "Note: Specify 0 days to lift a suspension, reason is not required when removing a suspension");
+		return;
+	}
+
+	const std::string& character_name = sep->arg[1];
+
+	const auto& e = CharacterDataRepository::FindByName(database, character_name);
+
+	if (!e.id) {
 		c->Message(
 			Chat::White,
-			"Usage: #suspend <charname> <days> (Specify 0 days to lift the suspension immediately) <message>"
+			fmt::format(
+				"Character '{}' does not exist.",
+				character_name
+			).c_str()
 		);
 		return;
 	}
 
-	int duration = atoi(sep->arg[2]);
+	auto a = AccountRepository::FindOne(database, e.account_id);
 
-	if (duration < 0) {
-		duration = 0;
+	if (!a.id) {
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"Character '{}' is not attached to an account.",
+				character_name
+			).c_str()
+		);
+		return;
 	}
 
-	std::string message;
+	const uint32 days         = Strings::ToUnsignedInt(sep->arg[2]);
+	const bool   is_suspend = days != 0;
 
-	if (duration > 0) {
-		int i = 3;
-		while (1) {
-			if (sep->arg[i][0] == 0) {
-				break;
-			}
+	const std::string reason = sep->arg[3] ? sep->argplus[3] : "";
 
-			if (message.length() > 0) {
-				message.push_back(' ');
-			}
+	a.status         = is_suspend ? -1 : 0;
+	a.suspendeduntil = is_suspend ? std::time(nullptr) + (days * 86400) : 0;
+	a.suspend_reason = is_suspend ? reason : "";
 
-			message += sep->arg[i];
-			++i;
-		}
+	if (!AccountRepository::UpdateOne(database, a)) {
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"Failed to {}suspend {}.",
+				is_suspend ? "" : "un",
+				character_name
+			).c_str()
+		);
+		return;
+	}
 
-		if (message.length() == 0) {
-			c->Message(
-				Chat::White,
-				"Usage: #suspend <charname> <days>(Specify 0 days to lift the suspension immediately) <message>"
-			);
+	c->Message(
+		Chat::White,
+		fmt::format(
+			"Account {} ({}) with the character {} {}.",
+			a.name,
+			a.id,
+			character_name,
+			(
+				is_suspend ?
+				fmt::format(
+					"has been suspended for {} day{}",
+					days,
+					days != 1 ? "s" : ""
+				) :
+				"is no longer suspended"
+			)
+		).c_str()
+	);
+
+	if (is_suspend) { // Only kick if we're suspending, otherwise there's no reason to kick someone who is already suspended
+		Client* b = entity_list.GetClientByName(character_name.c_str());
+
+		if (b) {
+			b->WorldKick();
 			return;
 		}
+
+		auto pack = new ServerPacket(ServerOP_KickPlayer, sizeof(ServerKickPlayer_Struct));
+		auto* k = (ServerKickPlayer_Struct*) pack->pBuffer;
+
+		strn0cpy(k->adminname, c->GetName(), sizeof(k->adminname));
+		strn0cpy(k->name, character_name.c_str(), sizeof(k->name));
+		k->adminrank = c->Admin();
+
+		worldserver.SendPacket(pack);
+
+		safe_delete(pack);
 	}
-
-	auto escName = new char[strlen(sep->arg[1]) * 2 + 1];
-	database.DoEscapeString(escName, sep->arg[1], strlen(sep->arg[1]));
-	int accountID = database.GetAccountIDByChar(escName);
-	safe_delete_array(escName);
-
-	if (accountID <= 0) {
-		c->Message(Chat::Red, "Character does not exist.");
-		return;
-	}
-
-	std::string query   = StringFormat(
-		"UPDATE `account` SET `suspendeduntil` = DATE_ADD(NOW(), INTERVAL %i DAY), "
-		"suspend_reason = '%s' WHERE `id` = %i",
-		duration, EscapeString(message).c_str(), accountID
-	);
-	auto        results = database.QueryDatabase(query);
-
-	if (duration) {
-		c->Message(
-			Chat::Red,
-			"Account number %i with the character %s has been temporarily suspended for %i day(s).",
-			accountID,
-			sep->arg[1],
-			duration
-		);
-	}
-	else {
-		c->Message(
-			Chat::Red,
-			"Account number %i with the character %s is no longer suspended.",
-			accountID,
-			sep->arg[1]
-		);
-	}
-
-	Client *bannedClient = entity_list.GetClientByName(sep->arg[1]);
-
-	if (bannedClient) {
-		bannedClient->WorldKick();
-		return;
-	}
-
-	auto                    pack = new ServerPacket(ServerOP_KickPlayer, sizeof(ServerKickPlayer_Struct));
-	ServerKickPlayer_Struct *sks = (ServerKickPlayer_Struct *) pack->pBuffer;
-
-	strn0cpy(sks->adminname, c->GetName(), sizeof(sks->adminname));
-	strn0cpy(sks->name, sep->arg[1], sizeof(sks->name));
-	sks->adminrank = c->Admin();
-
-	worldserver.SendPacket(pack);
-
-	safe_delete(pack);
 }
 

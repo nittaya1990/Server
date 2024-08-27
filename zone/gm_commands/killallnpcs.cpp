@@ -4,31 +4,26 @@ void command_killallnpcs(Client *c, const Seperator *sep)
 {
 	std::string search_string;
 	if (sep->arg[1]) {
-		search_string = str_tolower(sep->arg[1]);
+		search_string = Strings::ToLower(sep->arg[1]);
 	}
 
 	int killed_count = 0;
-	for (auto& npc_entity : entity_list.GetNPCList()) {
-		auto entity_id = npc_entity.first;
-		auto npc = npc_entity.second;
-		if (!npc) {
-			continue;
-		}
-		
-		std::string entity_name = str_tolower(npc->GetName());
-		if (
-			(
-				!search_string.empty() &&
-				entity_name.find(search_string) == std::string::npos
-			) ||
-			!npc->IsAttackAllowed(c)
-		) {
+
+	for (auto &e: entity_list.GetMobList()) {
+		auto *entity = e.second;
+		if (!entity || !entity->IsNPC()) {
 			continue;
 		}
 
-		npc->Damage(
+		std::string entity_name = Strings::ToLower(entity->GetName());
+		if ((!search_string.empty() && entity_name.find(search_string) == std::string::npos) ||
+			!entity->IsAttackAllowed(c)) {
+			continue;
+		}
+
+		entity->Damage(
 			c,
-			npc->GetHP(),
+			entity->GetHP() + 1000,
 			SPELL_UNKNOWN,
 			EQ::skills::SkillDragonPunch
 		);
@@ -45,26 +40,27 @@ void command_killallnpcs(Client *c, const Seperator *sep)
 				killed_count != 1 ? "s" : "",
 				(
 					!search_string.empty() ?
-					fmt::format(
-						" that matched '{}'",
-						search_string
-					) :
-					""
+						fmt::format(
+							" that matched '{}'",
+							search_string
+						) :
+						""
 				)
 			).c_str()
 		);
-	} else {
+	}
+	else {
 		c->Message(
 			Chat::White,
 			fmt::format(
 				"There were no NPCs to kill{}.",
 				(
 					!search_string.empty() ?
-					fmt::format(
-						" that matched '{}'",
-						search_string
-					) :
-					""
+						fmt::format(
+							" that matched '{}'",
+							search_string
+						) :
+						""
 				)
 			).c_str()
 		);

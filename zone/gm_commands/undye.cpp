@@ -2,11 +2,17 @@
 
 void command_undye(Client *c, const Seperator *sep)
 {
-	if (c->GetTarget() && c->GetTarget()->IsClient()) {
-		c->GetTarget()->CastToClient()->Undye();
+	auto target = c;
+	if (c->GetTarget() && c->GetTarget()->IsClient() && c->GetGM()) {
+		target = c->GetTarget()->CastToClient();
 	}
-	else {
-		c->Message(Chat::White, "ERROR: Client target required");
-	}
-}
 
+	target->Undye();
+	c->Message(
+		Chat::White,
+		fmt::format(
+			"Undyed armor for {}.",
+			c->GetTargetDescription(target)
+		).c_str()
+	);
+}

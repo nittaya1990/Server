@@ -28,10 +28,9 @@
 #include "string_ids.h"
 #include "worldserver.h"
 #include "zonedb.h"
-#include "zone_store.h"
 #include "position.h"
 
-float Mob::GetActSpellRange(uint16 spell_id, float range, bool IsBard)
+float Mob::GetActSpellRange(uint16 spell_id, float range)
 {
 	float extrange = 100;
 
@@ -40,95 +39,123 @@ float Mob::GetActSpellRange(uint16 spell_id, float range, bool IsBard)
 	return (range * extrange) / 100;
 }
 
-int32 Mob::GetActSpellDamage(uint16 spell_id, int32 value, Mob* target) {
-
-	if (spells[spell_id].target_type == ST_Self)
+int64 Mob::GetActSpellDamage(uint16 spell_id, int64 value, Mob* target) {
+	if (spells[spell_id].target_type == ST_Self) {
 		return value;
+	}
 
-	if (IsNPC())
-		value += value*CastToNPC()->GetSpellFocusDMG()/100;
+	if (IsNPC()) {
+		value += value * CastToNPC()->GetSpellFocusDMG() / 100;
+
+		if (CastToNPC()->GetSpellScale()) {
+			value = int64(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
+		}
+	}
+
+	if (RuleB(Spells, AllowExtraDmgSkill) && RuleB(Character, ItemExtraSkillDamageCalcAsPercent) && GetSkillDmgAmt(spells[spell_id].skill) > 0) {
+		value *= std::abs(GetSkillDmgAmt(spells[spell_id].skill) / 100);
+	}
 
 	bool Critical = false;
-	int32 base_value = value;
+	int64 base_value = value;
 	int chance = 0;
+	int legacy_manaburn_cap = RuleI(Spells, LegacyManaburnCap);
 
-	// Need to scale HT damage differently after level 40! It no longer scales by the constant value in the spell file. It scales differently, instead of 10 more damage per level, it does 30 more damage per level. So we multiply the level minus 40 times 20 if they are over level 40.
-	if ((spell_id == SPELL_HARM_TOUCH || spell_id == SPELL_HARM_TOUCH2 || spell_id == SPELL_IMP_HARM_TOUCH ) && GetLevel() > 40)
-		value -= (GetLevel() - 40) * 20;
-
-	//This adds the extra damage from the AA Unholy Touch, 450 per level to the AA Improved Harm TOuch.
-	if (spell_id == SPELL_IMP_HARM_TOUCH && IsClient()) //Improved Harm Touch
-		value -= GetAA(aaUnholyTouch) * 450; //Unholy Touch
-
-		chance = RuleI(Spells, BaseCritChance); //Wizard base critical chance is 2% (Does not scale with level)
-		chance += itembonuses.CriticalSpellChance + spellbonuses.CriticalSpellChance + aabonuses.CriticalSpellChance;
-		chance += itembonuses.FrenziedDevastation + spellbonuses.FrenziedDevastation + aabonuses.FrenziedDevastation;
+	chance = RuleI(Spells, BaseCritChance); //Wizard base critical chance is 2% (Does not scale with level)
+	chance += itembonuses.CriticalSpellChance + spellbonuses.CriticalSpellChance + aabonuses.CriticalSpellChance;
+	chance += itembonuses.FrenziedDevastation + spellbonuses.FrenziedDevastation + aabonuses.FrenziedDevastation;
 
 	//Crtical Hit Calculation pathway
-	if (chance > 0 || (IsClient() && GetClass() == WIZARD && GetLevel() >= RuleI(Spells, WizCritLevel))) {
+	if (chance > 0 || (IsOfClientBot() && GetClass() == Class::Wizard && GetLevel() >= RuleI(Spells, WizCritLevel))) {
 
 		 int32 ratio = RuleI(Spells, BaseCritRatio); //Critical modifier is applied from spell effects only. Keep at 100 for live like criticals.
 
 		//Improved Harm Touch is a guaranteed crit if you have at least one level of SCF.
-		if (spell_id == SPELL_IMP_HARM_TOUCH && IsClient() && (GetAA(aaSpellCastingFury) > 0) && (GetAA(aaUnholyTouch) > 0))
+		if (spell_id == SPELL_IMP_HARM_TOUCH && IsOfClientBot() && (GetAA(aaSpellCastingFury) > 0) && (GetAA(aaUnholyTouch) > 0)) {
 			 chance = 100;
+		}
 
-		if (spells[spell_id].override_crit_chance > 0 && chance > spells[spell_id].override_crit_chance)
+		if (spells[spell_id].override_crit_chance > 0 && chance > spells[spell_id].override_crit_chance) {
 			chance = spells[spell_id].override_crit_chance;
+		}
 
 		if (zone->random.Roll(chance)) {
 			Critical = true;
 			ratio += itembonuses.SpellCritDmgIncrease + spellbonuses.SpellCritDmgIncrease + aabonuses.SpellCritDmgIncrease;
 			ratio += itembonuses.SpellCritDmgIncNoStack + spellbonuses.SpellCritDmgIncNoStack + aabonuses.SpellCritDmgIncNoStack;
-		}
-
-		else if ((IsClient() && GetClass() == WIZARD) || (IsMerc() && GetClass() == CASTERDPS)) {
-			if ((GetLevel() >= RuleI(Spells, WizCritLevel)) && zone->random.Roll(RuleI(Spells, WizCritChance))){
+		} else if ((IsOfClientBot() && GetClass() == Class::Wizard) || (IsMerc() && GetClass() == CASTERDPS)) {
+			if ((GetLevel() >= RuleI(Spells, WizCritLevel)) && zone->random.Roll(RuleI(Spells, WizCritChance))) {
 				//Wizard innate critical chance is calculated seperately from spell effect and is not a set ratio. (20-70 is parse confirmed)
-				ratio += zone->random.Int(20,70);
+				ratio += zone->random.Int(RuleI(Spells, WizardCritMinimumRandomRatio), RuleI(Spells, WizardCritMaximumRandomRatio));
 				Critical = true;
 			}
 		}
 
-		if (IsClient() && GetClass() == WIZARD)
+		if (IsOfClientBot() && GetClass() == Class::Wizard) {
 			ratio += RuleI(Spells, WizCritRatio); //Default is zero
+		}
 
-		if (Critical){
+		if (IsClient() && IsHarmTouchSpell(spell_id)) {
+			ratio += RuleI(Spells, HarmTouchCritRatio); //Default is zero
+		}
 
+		if (Critical) {
 			value = base_value*ratio/100;
 
-			value += base_value*GetFocusEffect(focusImprovedDamage, spell_id)/100;
-			value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id)/100;
+			if (RuleB(Spells, UseClassicHarmTouchDamage)) {
+				// Need to scale HT damage differently after level 40! It no longer scales by the constant value in the spell file. It scales differently, instead of 10 more damage per level, it does 30 more damage per level. So we multiply the level minus 40 times 20 if they are over level 40.
+				if (IsHarmTouchSpell(spell_id) && GetLevel() > 40) {
+					value -= (GetLevel() - 40) * 20;
+				}
 
-			value += int(base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id)/100)*ratio/100;
-			value += int(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id) / 100)*ratio / 100;
+				//This adds the extra damage from the AA Unholy Touch, 450 per level to the AA Improved Harm TOuch.
+				if (spell_id == SPELL_IMP_HARM_TOUCH && IsOfClientBotMerc()) { //Improved Harm Touch
+					value -= GetAA(aaUnholyTouch) * 450; //Unholy Touch
+				}
+			}
+
+			value += base_value*GetFocusEffect(focusImprovedDamage, spell_id) / 100;
+			value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id) / 100;
+
+			value += int(base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id) / 100) * ratio / 100;
+			value += int(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id) / 100) * ratio / 100;
 
 			if (target) {
-				value += int(base_value*target->GetVulnerability(this, spell_id, 0)/100)*ratio/100;
+				value += int(base_value*target->GetVulnerability(this, spell_id, 0) / 100) * ratio / 100;
 				value -= target->GetFcDamageAmtIncoming(this, spell_id);
 			}
 
-			value -= GetFocusEffect(focusFcDamageAmtCrit, spell_id)*ratio/100;
+			value -= GetFocusEffect(focusFcDamageAmtCrit, spell_id) * ratio / 100;
 
 			value -= GetFocusEffect(focusFcDamageAmt, spell_id);
 			value -= GetFocusEffect(focusFcDamageAmt2, spell_id);
 			value -= GetFocusEffect(focusFcAmplifyAmt, spell_id);
 
-			if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg)
-				value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value)*ratio / 100;
+			if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+				value -= GetSkillDmgAmt(spells[spell_id].skill) * ratio / 100;
+			}
 
-			else if(!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5)
-				value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value)*ratio/100;
+			if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg) {
+				value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value) * ratio / 100;
 
-			else if (IsNPC() && CastToNPC()->GetSpellScale())
-				value = int(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
+			} else if (!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5) {
+				value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value) * ratio / 100;
+			}
 
-			entity_list.MessageCloseString(
-				this, true, 100, Chat::SpellCrit,
-				OTHER_CRIT_BLAST, GetName(), itoa(-value));
+			// legacy manaburn can crit, but is still held to the same cap
+			if (RuleB(Spells, LegacyManaburn) && spell_id == SPELL_MANA_BURN) {
+				if (value < -legacy_manaburn_cap) {
+					value = -legacy_manaburn_cap;
+				}
+			}
 
-			if (IsClient())
+			entity_list.FilteredMessageCloseString(
+				this, true, 100, Chat::SpellCrit, FilterSpellCrits,
+				OTHER_CRIT_BLAST, nullptr, GetName(), itoa(-value));
+
+			if (IsClient()) {
 				MessageString(Chat::SpellCrit, YOU_CRIT_BLAST, itoa(-value));
+			}
 
 			return value;
 		}
@@ -136,14 +163,14 @@ int32 Mob::GetActSpellDamage(uint16 spell_id, int32 value, Mob* target) {
 	//Non Crtical Hit Calculation pathway
 	value = base_value;
 
-	value += base_value*GetFocusEffect(focusImprovedDamage, spell_id)/100;
-	value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id)/100;
+	value += base_value*GetFocusEffect(focusImprovedDamage, spell_id) / 100;
+	value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id) / 100;
 
-	value += base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id)/100;
-	value += base_value*GetFocusEffect(focusFcAmplifyMod, spell_id)/100;
+	value += base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id) / 100;
+	value += base_value*GetFocusEffect(focusFcAmplifyMod, spell_id) / 100;
 
 	if (target) {
-		value += base_value*target->GetVulnerability(this, spell_id, 0)/100;
+		value += base_value*target->GetVulnerability(this, spell_id, 0) / 100;
 		value -= target->GetFcDamageAmtIncoming(this, spell_id);
 	}
 
@@ -153,19 +180,32 @@ int32 Mob::GetActSpellDamage(uint16 spell_id, int32 value, Mob* target) {
 	value -= GetFocusEffect(focusFcDamageAmt2, spell_id);
 	value -= GetFocusEffect(focusFcAmplifyAmt, spell_id);
 
+	if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+		value -= GetSkillDmgAmt(spells[spell_id].skill);
+	}
+
 	if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg)
 		value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value);
 
-	else if (!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5)
-		 value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value);
+	else if (
+		!spells[spell_id].no_heal_damage_item_mod &&
+		GetSpellDmg() &&
+		spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5
+	) {
+		value -= GetExtraSpellAmt(spell_id, GetSpellDmg(), base_value);
+	}
 
-	if (IsNPC() && CastToNPC()->GetSpellScale())
-		value = int(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
+	// Apply Manaburn Damage Cap
+	if (RuleB(Spells, LegacyManaburn) && spell_id == SPELL_MANA_BURN) {
+		if (value < -legacy_manaburn_cap) {
+			value = -legacy_manaburn_cap;
+		}
+	}
 
 	return value;
 }
 
-int32 Mob::GetActReflectedSpellDamage(int32 spell_id, int32 value, int effectiveness) {
+int64 Mob::GetActReflectedSpellDamage(uint16 spell_id, int64 value, int effectiveness) {
 	/*
 		Reflected spells use the spells base damage before any modifiers or formulas applied.
 		That value can then be modifier by the reflect spells 'max' value, defined here as effectiveness
@@ -177,13 +217,21 @@ int32 Mob::GetActReflectedSpellDamage(int32 spell_id, int32 value, int effective
 		value += value * CastToNPC()->GetSpellFocusDMG() / 100;
 
 		if (CastToNPC()->GetSpellScale()) {
-			value = int(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
+			value = int64(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
 		}
 	}
 
-	int32 base_spell_dmg = value;
+	if (RuleB(Spells, AllowExtraDmgSkill) && RuleB(Character, ItemExtraSkillDamageCalcAsPercent) && GetSkillDmgAmt(spells[spell_id].skill) > 0) {
+		value *= std::abs(GetSkillDmgAmt(spells[spell_id].skill) / 100);
+	}
+
+	int64 base_spell_dmg = value;
 
 	value = value * effectiveness / 100;
+
+	if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+		value -= GetSkillDmgAmt(spells[spell_id].skill);
+	}
 
 	if (!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg) {
 		value -= GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_spell_dmg);
@@ -192,17 +240,25 @@ int32 Mob::GetActReflectedSpellDamage(int32 spell_id, int32 value, int effective
 	return value;
 }
 
-int32 Mob::GetActDoTDamage(uint16 spell_id, int32 value, Mob* target) {
+int64 Mob::GetActDoTDamage(uint16 spell_id, int64 value, Mob* target, bool from_buff_tic) {
 
 	if (target == nullptr)
 		return value;
-	
+
 	if (IsNPC()) {
 		value += value * CastToNPC()->GetSpellFocusDMG() / 100;
+
+		if (CastToNPC()->GetSpellScale()) {
+			value = int64(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
+		}
 	}
 
-	int32 base_value = value;
-	int32 extra_dmg = 0;
+	if (RuleB(Spells, AllowExtraDmgSkill) && RuleB(Character, ItemExtraSkillDamageCalcAsPercent) && GetSkillDmgAmt(spells[spell_id].skill) > 0) {
+		value *= std::abs(GetSkillDmgAmt(spells[spell_id].skill) / 100);
+	}
+
+	int64 base_value = value;
+	int64 extra_dmg = 0;
 	int16 chance = 0;
 	chance += itembonuses.CriticalDoTChance + spellbonuses.CriticalDoTChance + aabonuses.CriticalDoTChance;
 
@@ -213,33 +269,48 @@ int32 Mob::GetActDoTDamage(uint16 spell_id, int32 value, Mob* target) {
 		chance = spells[spell_id].override_crit_chance;
 
 	if (!spells[spell_id].good_effect && chance > 0 && (zone->random.Roll(chance))) {
-		int32 ratio = 200;
+		int64 ratio = 200;
 		ratio += itembonuses.DotCritDmgIncrease + spellbonuses.DotCritDmgIncrease + aabonuses.DotCritDmgIncrease;
 		value = base_value*ratio/100;
-		value += int(base_value*GetFocusEffect(focusImprovedDamage, spell_id)/100)*ratio/100;
-		value += int(base_value*GetFocusEffect(focusImprovedDamage2, spell_id)/100)*ratio/100;
-		value += int(base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id)/100)*ratio/100;
-		value += int(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id) / 100)*ratio/100;
-		value += int(base_value*target->GetVulnerability(this, spell_id, 0)/100)*ratio/100;
-		extra_dmg = target->GetFcDamageAmtIncoming(this, spell_id) +
-					int(GetFocusEffect(focusFcDamageAmtCrit, spell_id)*ratio/100) +
-					GetFocusEffect(focusFcDamageAmt, spell_id) +
-					GetFocusEffect(focusFcDamageAmt2, spell_id) +
-					GetFocusEffect(focusFcAmplifyAmt, spell_id);
-					
+		value += int64(base_value*GetFocusEffect(focusImprovedDamage, spell_id, nullptr, from_buff_tic)/100)*ratio/100;
+		value += int64(base_value*GetFocusEffect(focusImprovedDamage2, spell_id, nullptr, from_buff_tic)/100)*ratio/100;
+		value += int64(base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id, nullptr, from_buff_tic)/100)*ratio/100;
+		value += int64(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id, nullptr, from_buff_tic) / 100)*ratio/100;
+		value += int64(base_value*target->GetVulnerability(this, spell_id, 0, from_buff_tic)/100)*ratio/100;
+		extra_dmg = target->GetFcDamageAmtIncoming(this, spell_id, from_buff_tic) +
+					int64(GetFocusEffect(focusFcDamageAmtCrit, spell_id, nullptr, from_buff_tic)*ratio/100) +
+					GetFocusEffect(focusFcDamageAmt, spell_id, nullptr, from_buff_tic) +
+					GetFocusEffect(focusFcDamageAmt2, spell_id, nullptr, from_buff_tic) +
+					GetFocusEffect(focusFcAmplifyAmt, spell_id, nullptr, from_buff_tic);
+
 		if (RuleB(Spells, DOTsScaleWithSpellDmg)) {
-			if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg) {
-				extra_dmg += GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value)*ratio/100;
+			if (
+				RuleB(Spells, IgnoreSpellDmgLvlRestriction) &&
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetSpellDmg()
+			) {
+				extra_dmg += GetExtraSpellAmt(spell_id, GetSpellDmg(), base_value)*ratio/100;
 			}
-			else if(!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5) {
-				extra_dmg += GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value)*ratio/100;
+			else if (
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetSpellDmg() &&
+				spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5
+			) {
+				extra_dmg += GetExtraSpellAmt(spell_id, GetSpellDmg(), base_value)*ratio/100;
 			}
 		}
 
-		if (extra_dmg) {
-			int duration = CalcBuffDuration(this, target, spell_id);
-			if (duration > 0)
-				extra_dmg /= duration;
+		if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+			extra_dmg += GetSkillDmgAmt(spells[spell_id].skill) * ratio / 100;
+		}
+
+		if (RuleB(Spells, DOTBonusDamageSplitOverDuration)) {
+			if (extra_dmg) {
+				const int duration = CalcBuffDuration(this, target, spell_id);
+				if (duration > 0) {
+					extra_dmg /= duration;
+				}
+			}
 		}
 
 		value -= extra_dmg;
@@ -247,76 +318,110 @@ int32 Mob::GetActDoTDamage(uint16 spell_id, int32 value, Mob* target) {
 	else {
 
 		value = base_value;
-		value += base_value*GetFocusEffect(focusImprovedDamage, spell_id)/100;
-		value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id)/100;
-		value += base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id)/100;
-		value += base_value*GetFocusEffect(focusFcAmplifyMod, spell_id)/100;
-		value += base_value*target->GetVulnerability(this, spell_id, 0)/100;
-		extra_dmg = target->GetFcDamageAmtIncoming(this, spell_id) +
-					GetFocusEffect(focusFcDamageAmtCrit, spell_id) +
-					GetFocusEffect(focusFcDamageAmt, spell_id) +
-					GetFocusEffect(focusFcDamageAmt2, spell_id) +
-					GetFocusEffect(focusFcAmplifyAmt, spell_id);
-					
+		value += base_value*GetFocusEffect(focusImprovedDamage, spell_id, nullptr, from_buff_tic)/100;
+		value += base_value*GetFocusEffect(focusImprovedDamage2, spell_id, nullptr, from_buff_tic)/100;
+		value += base_value*GetFocusEffect(focusFcDamagePctCrit, spell_id, nullptr, from_buff_tic)/100;
+		value += base_value*GetFocusEffect(focusFcAmplifyMod, spell_id, nullptr, from_buff_tic)/100;
+		value += base_value*target->GetVulnerability(this, spell_id, 0, from_buff_tic)/100;
+		extra_dmg = target->GetFcDamageAmtIncoming(this, spell_id, from_buff_tic) +
+					GetFocusEffect(focusFcDamageAmtCrit, spell_id, nullptr, from_buff_tic) +
+					GetFocusEffect(focusFcDamageAmt, spell_id, nullptr, from_buff_tic) +
+					GetFocusEffect(focusFcDamageAmt2, spell_id, nullptr, from_buff_tic) +
+					GetFocusEffect(focusFcAmplifyAmt, spell_id, nullptr, from_buff_tic);
+
 		if (RuleB(Spells, DOTsScaleWithSpellDmg)) {
-			if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg) {
-				extra_dmg += GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value);
+			if (
+				RuleB(Spells, IgnoreSpellDmgLvlRestriction) &&
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetSpellDmg()
+			) {
+				extra_dmg += GetExtraSpellAmt(spell_id, GetSpellDmg(), base_value);
 			}
-			else if(!spells[spell_id].no_heal_damage_item_mod && itembonuses.SpellDmg && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5) {
-				extra_dmg += GetExtraSpellAmt(spell_id, itembonuses.SpellDmg, base_value);
+			else if (
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetSpellDmg() &&
+				spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5
+			) {
+				extra_dmg += GetExtraSpellAmt(spell_id, GetSpellDmg(), base_value);
 			}
 		}
 
-		if (extra_dmg) {
-			int duration = CalcBuffDuration(this, target, spell_id);
-			if (duration > 0)
-				extra_dmg /= duration;
+		if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+			extra_dmg += GetSkillDmgAmt(spells[spell_id].skill);
+		}
+
+		if (RuleB(Spells, DOTBonusDamageSplitOverDuration)) {
+			if (extra_dmg) {
+				const int duration = CalcBuffDuration(this, target, spell_id);
+				if (duration > 0) {
+					extra_dmg /= duration;
+				}
+			}
 		}
 
 		value -= extra_dmg;
 	}
 
-	if (IsNPC() && CastToNPC()->GetSpellScale())
-		value = int(static_cast<float>(value) * CastToNPC()->GetSpellScale() / 100.0f);
-
 	return value;
 }
 
-int32 Mob::GetExtraSpellAmt(uint16 spell_id, int32 extra_spell_amt, int32 base_spell_dmg)
+int64 Mob::GetExtraSpellAmt(uint16 spell_id, int64 extra_spell_amt, int64 base_spell_dmg)
 {
-	if (RuleB(Spells, FlatItemExtraSpellAmt))
-		return extra_spell_amt;
+
+	if (RuleB(Spells, FlatItemExtraSpellAmt)) {
+		if (RuleB(Spells, ItemExtraSpellAmtCalcAsPercent)) {
+			return std::abs(base_spell_dmg) * extra_spell_amt / 100;
+		} else {
+			return extra_spell_amt;
+		}
+	}
 
 	int total_cast_time = 0;
 
-	if (spells[spell_id].recast_time >= spells[spell_id].recovery_time)
-			total_cast_time = spells[spell_id].recast_time + spells[spell_id].cast_time;
-	else
+	if (spells[spell_id].recast_time >= spells[spell_id].recovery_time) {
+		total_cast_time = spells[spell_id].recast_time + spells[spell_id].cast_time;
+	} else {
 		total_cast_time = spells[spell_id].recovery_time + spells[spell_id].cast_time;
+	}
 
-	if (total_cast_time > 0 && total_cast_time <= 2500)
-		extra_spell_amt = extra_spell_amt*25/100;
-	 else if (total_cast_time > 2500 && total_cast_time < 7000)
-		 extra_spell_amt = extra_spell_amt*(167*((total_cast_time - 1000)/1000)) / 1000;
-	 else
-		 extra_spell_amt = extra_spell_amt * total_cast_time / 7000;
+	if (total_cast_time > 0 && total_cast_time <= 2500) {
+		extra_spell_amt = extra_spell_amt * 25 / 100;
+	} else if (total_cast_time > 2500 && total_cast_time < 7000) {
+		extra_spell_amt = extra_spell_amt * (167 * ((total_cast_time - 1000) / 1000)) / 1000;
+	} else {
+		extra_spell_amt = extra_spell_amt * total_cast_time / 7000;
+	}
 
 	//Confirmed with parsing 10/9/21 ~Kayen
-	if (extra_spell_amt * 2 > abs(base_spell_dmg)) {
-		extra_spell_amt = abs(base_spell_dmg) / 2;
+	if (extra_spell_amt * 2 > std::abs(base_spell_dmg)) {
+		extra_spell_amt = std::abs(base_spell_dmg) / 2;
+	}
+
+	if (RuleB(Spells, ItemExtraSpellAmtCalcAsPercent)) {
+		return std::abs(base_spell_dmg) * extra_spell_amt / 100;
 	}
 
 	return extra_spell_amt;
 }
 
-int32 Mob::GetActSpellHealing(uint16 spell_id, int32 value, Mob* target) {
-
+int64 Mob::GetActSpellHealing(uint16 spell_id, int64 value, Mob* target, bool from_buff_tic) {
+	if (target == nullptr && IsBot()) {
+		target = this;
+	}
 
 	if (IsNPC()) {
 		value += value * CastToNPC()->GetSpellFocusHeal() / 100;
+
+		if (IsNPC() && CastToNPC()->GetHealScale()) {
+			value = int(static_cast<float>(value) * CastToNPC()->GetHealScale() / 100.0f);
+		}
 	}
 
-	int32 base_value = value;
+	if (RuleB(Spells, AllowExtraDmgSkill) && RuleB(Character, ItemExtraSkillDamageCalcAsPercent) && GetSkillDmgAmt(spells[spell_id].skill) > 0) {
+		value *= std::abs(GetSkillDmgAmt(spells[spell_id].skill) / 100);
+	}
+
+	int64 base_value = value;
 	int16 critical_chance = 0;
 	int8  critical_modifier = 1;
 
@@ -346,28 +451,44 @@ int32 Mob::GetActSpellHealing(uint16 spell_id, int32 value, Mob* target) {
 		}
 	}
 
-	if (GetClass() == CLERIC) {
-		value += int(base_value*RuleI(Spells, ClericInnateHealFocus) / 100);  //confirmed on live parsing clerics get an innate 5 pct heal focus
+	if (GetClass() == Class::Cleric) {
+		value += int64(base_value*RuleI(Spells, ClericInnateHealFocus) / 100);  //confirmed on live parsing clerics get an innate 5 pct heal focus
 	}
-	value += int(base_value*GetFocusEffect(focusImprovedHeal, spell_id) / 100);
-	value += int(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id) / 100);
+	value += int64(base_value*GetFocusEffect(focusImprovedHeal, spell_id, nullptr, from_buff_tic) / 100);
+	value += int64(base_value*GetFocusEffect(focusFcAmplifyMod, spell_id, nullptr, from_buff_tic) / 100);
 
 	// Instant Heals
 	if (spells[spell_id].buff_duration < 1) {
 
+		if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+			value += GetSkillDmgAmt(spells[spell_id].skill);
+		}
+
 		if (target) {
-			value += int(base_value * target->GetFocusEffect(focusFcHealPctIncoming, spell_id)/100); //SPA 393 Add before critical
-			value += int(base_value * target->GetFocusEffect(focusFcHealPctCritIncoming, spell_id)/100); //SPA 395 Add before critical (?)
+			value += int64(base_value * target->GetFocusEffect(focusFcHealPctIncoming, spell_id, this)/100); //SPA 393 Add before critical
+			value += int64(base_value * target->GetFocusEffect(focusFcHealPctCritIncoming, spell_id, this)/100); //SPA 395 Add before critical (?)
 		}
 
 		value += GetFocusEffect(focusFcHealAmtCrit, spell_id); //SPA 396 Add before critical
 
-		if (!spells[spell_id].no_heal_damage_item_mod && itembonuses.HealAmt && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5) {
-			value += GetExtraSpellAmt(spell_id, itembonuses.HealAmt, base_value); //Item Heal Amt Add before critical
+		//Using IgnoreSpellDmgLvlRestriction to also allow healing to scale
+		if (
+			RuleB(Spells, IgnoreSpellDmgLvlRestriction) &&
+			!spells[spell_id].no_heal_damage_item_mod &&
+			GetHealAmt()
+		) {
+			value += GetExtraSpellAmt(spell_id, GetHealAmt(), base_value); //Item Heal Amt Add before critical
+		}
+		else if (
+			!spells[spell_id].no_heal_damage_item_mod &&
+			GetHealAmt() &&
+			spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5
+		) {
+			value += GetExtraSpellAmt(spell_id, GetHealAmt(), base_value); //Item Heal Amt Add before critical
 		}
 
 		if (target) {
-			value += value * target->GetHealRate() / 100;  //SPA 120 modifies value after Focus Applied but before critical
+			value += value * target->GetHealRate() / 100; //SPA 120 modifies value after Focus Applied but before critical
 		}
 
 		/*
@@ -379,11 +500,7 @@ int32 Mob::GetActSpellHealing(uint16 spell_id, int32 value, Mob* target) {
 		value += GetFocusEffect(focusFcAmplifyAmt, spell_id); //SPA 508 ? Add after critical
 
 		if (target) {
-			value += target->GetFocusEffect(focusFcHealAmtIncoming, spell_id); //SPA 394 Add after critical
-		}
-
-		if (IsNPC() && CastToNPC()->GetHealScale()) {
-			value = int(static_cast<float>(value) * CastToNPC()->GetHealScale() / 100.0f);
+			value += target->GetFocusEffect(focusFcHealAmtIncoming, spell_id, this); //SPA 394 Add after critical
 		}
 
 		if (critical_modifier > 1) {
@@ -402,37 +519,48 @@ int32 Mob::GetActSpellHealing(uint16 spell_id, int32 value, Mob* target) {
 	//Heal over time spells. [Heal Rate and Additional Healing effects do not increase this value]
 	else {
 		//Using IgnoreSpellDmgLvlRestriction to also allow healing to scale
-		int32 extra_heal = 0;
+		int64 extra_heal = 0;
+
+		if (RuleB(Spells, AllowExtraDmgSkill) && !RuleB(Character, ItemExtraSkillDamageCalcAsPercent)) {
+			extra_heal += GetSkillDmgAmt(spells[spell_id].skill);
+		}
+
 		if (RuleB(Spells, HOTsScaleWithHealAmt)) {
-			if (RuleB(Spells, IgnoreSpellDmgLvlRestriction) && !spells[spell_id].no_heal_damage_item_mod && itembonuses.HealAmt) {
-				extra_heal += GetExtraSpellAmt(spell_id, itembonuses.HealAmt, base_value);
+			if (
+				RuleB(Spells, IgnoreSpellDmgLvlRestriction) &&
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetHealAmt()
+			) {
+				extra_heal += GetExtraSpellAmt(spell_id, GetHealAmt(), base_value);
 			}
-			else if(!spells[spell_id].no_heal_damage_item_mod && itembonuses.HealAmt && spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5) {
-				extra_heal += GetExtraSpellAmt(spell_id, itembonuses.HealAmt, base_value);
+			else if (
+				!spells[spell_id].no_heal_damage_item_mod &&
+				GetHealAmt() &&
+				spells[spell_id].classes[(GetClass() % 17) - 1] >= GetLevel() - 5
+			) {
+				extra_heal += GetExtraSpellAmt(spell_id, GetHealAmt(), base_value);
 			}
 		}
-		
+
 		if (extra_heal) {
-			int duration = CalcBuffDuration(this, target, spell_id);
-			if (duration > 0) {
-				extra_heal /= duration;
-				value += extra_heal;
+			if (RuleB(Spells, HOTBonusHealingSplitOverDuration)) {
+				const int duration = CalcBuffDuration(this, target, spell_id);
+				if (duration > 0) {
+					extra_heal /= duration;
+				}
 			}
+
+			value += extra_heal;
 		}
 
-		if (critical_chance && zone->random.Roll(critical_chance))
-			value *= critical_modifier;
-	}
-
-	if (IsNPC() && CastToNPC()->GetHealScale()) {
-		value = int(static_cast<float>(value) * CastToNPC()->GetHealScale() / 100.0f);
+		value *= critical_modifier;
 	}
 
 	return value;
 }
 
 
-int32 Client::GetActSpellCost(uint16 spell_id, int32 cost)
+int32 Mob::GetActSpellCost(uint16 spell_id, int32 cost)
 {
 	//FrenziedDevastation doubles mana cost of all DD spells
 	int16 FrenziedDevastation = itembonuses.FrenziedDevastation + spellbonuses.FrenziedDevastation + aabonuses.FrenziedDevastation;
@@ -443,7 +571,7 @@ int32 Client::GetActSpellCost(uint16 spell_id, int32 cost)
 	// Formula = Unknown exact, based off a random percent chance up to mana cost(after focuses) of the cast spell
 	if(itembonuses.Clairvoyance && spells[spell_id].classes[(GetClass()%17) - 1] >= GetLevel() - 5)
 	{
-		int16 mana_back = itembonuses.Clairvoyance * zone->random.Int(1, 100) / 100;
+		int mana_back = itembonuses.Clairvoyance * zone->random.Int(1, 100) / 100;
 		// Doesnt generate mana, so best case is a free spell
 		if(mana_back > cost)
 			mana_back = cost;
@@ -483,6 +611,22 @@ int32 Client::GetActSpellCost(uint16 spell_id, int32 cost)
 
 int32 Mob::GetActSpellDuration(uint16 spell_id, int32 duration)
 {
+	// focuses don't affect discipline duration (Except War Cries)
+	if (
+		IsDiscipline(spell_id) &&
+		(
+			spell_id != SPELL_BATTLE_CRY &&
+			spell_id != SPELL_WAR_CRY &&
+			spell_id != SPELL_BATTLE_CRY_OF_DRAVEL &&
+			spell_id != SPELL_WAR_CRY_OF_DRAVEL &&
+			spell_id != SPELL_BATTLE_CRY_OF_THE_MASTRUQ &&
+			spell_id != SPELL_ANCIENT_CRY_OF_CHAOS &&
+			spell_id != SPELL_BLOODTHIRST
+		)
+	) {
+		return duration;
+	}
+
 	int increase = 100;
 	increase += GetFocusEffect(focusSpellDuration, spell_id);
 	int tic_inc = 0;
@@ -503,109 +647,100 @@ bool Client::TrainDiscipline(uint32 itemid) {
 
 	//get the item info
 	const EQ::ItemData *item = database.GetItem(itemid);
-	if(item == nullptr) {
+	if (!item) {
 		Message(Chat::Red, "Unable to find the tome you turned in!");
-		LogError("Unable to find turned in tome id [{}]\n", (unsigned long)itemid);
-		return(false);
+		LogError("Unable to find turned in tome id [{}]", itemid);
+		return false;
 	}
 
 	if (!item->IsClassCommon() || item->ItemType != EQ::item::ItemTypeSpell) {
 		Message(Chat::Red, "Invalid item type, you cannot learn from this item.");
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
 	//Need a way to determine the difference between a spell and a tome
 	//so they cant turn in a spell and get it as a discipline
 	//this is kinda a hack:
-	if(!(
-		item->Name[0] == 'T' &&
-		item->Name[1] == 'o' &&
-		item->Name[2] == 'm' &&
-		item->Name[3] == 'e' &&
-		item->Name[4] == ' '
-		) && !(
-		item->Name[0] == 'S' &&
-		item->Name[1] == 'k' &&
-		item->Name[2] == 'i' &&
-		item->Name[3] == 'l' &&
-		item->Name[4] == 'l' &&
-		item->Name[5] == ':' &&
-		item->Name[6] == ' '
-		)) {
+	const std::string item_name = item->Name;
+
+	if (
+		!Strings::BeginsWith(item_name, "Tome of ") &&
+		!Strings::BeginsWith(item_name, "Skill: ")
+	) {
 		Message(Chat::Red, "This item is not a tome.");
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
-	int myclass = GetClass();
-	if(myclass == WIZARD || myclass == ENCHANTER || myclass == MAGICIAN || myclass == NECROMANCER) {
+	const auto player_class = GetClass();
+	if (player_class == Class::Wizard || player_class == Class::Enchanter || player_class == Class::Magician || player_class == Class::Necromancer) {
 		Message(Chat::Red, "Your class cannot learn from this tome.");
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
 	//make sure we can train this...
 	//can we use the item?
-	uint32 cbit = 1 << (myclass-1);
-	if(!(item->Classes & cbit)) {
+	const auto class_bit = static_cast<uint32>(1 << (player_class - 1));
+	if (!(item->Classes & class_bit)) {
 		Message(Chat::Red, "Your class cannot learn from this tome.");
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
-	uint32 spell_id = item->Scroll.Effect;
-	if(!IsValidSpell(spell_id)) {
-		Message(Chat::Red, "This tome contains invalid knowledge.");
-		return(false);
+	const auto spell_id = static_cast<uint32>(item->Scroll.Effect);
+	if (!IsValidSpell(spell_id)) {
+		Message(Chat::Red, "This tome Contains invalid knowledge.");
+		return false;
 	}
 
 	//can we use the spell?
-	const SPDat_Spell_Struct &spell = spells[spell_id];
-	uint8 level_to_use = spell.classes[myclass - 1];
-	if(level_to_use == 255) {
+	const auto& spell = spells[spell_id];
+	const auto level_to_use = spell.classes[player_class - 1];
+	if (level_to_use == 255) {
 		Message(Chat::Red, "Your class cannot learn from this tome.");
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
-	if(level_to_use > GetLevel()) {
-		Message(Chat::Red, "You must be at least level %d to learn this discipline.", level_to_use);
+	if (level_to_use > GetLevel()) {
+		Message(Chat::Red, fmt::format("You must be at least level {} to learn this discipline.", level_to_use).c_str());
 		//summon them the item back...
 		SummonItem(itemid);
-		return(false);
+		return false;
 	}
 
 	//add it to PP.
-	int r;
-	for(r = 0; r < MAX_PP_DISCIPLINES; r++) {
-		if(m_pp.disciplines.values[r] == spell_id) {
+	for (int r = 0; r < MAX_PP_DISCIPLINES; r++) {
+		if (m_pp.disciplines.values[r] == spell_id) {
 			Message(Chat::Red, "You already know this discipline.");
 			//summon them the item back...
 			SummonItem(itemid);
-			return(false);
-		} else if(m_pp.disciplines.values[r] == 0) {
+			return false;
+		} else if (m_pp.disciplines.values[r] == 0) {
 			m_pp.disciplines.values[r] = spell_id;
-			database.SaveCharacterDisc(this->CharacterID(), r, spell_id);
+			database.SaveCharacterDiscipline(CharacterID(), r, spell_id);
 			SendDisciplineUpdate();
-			Message(0, "You have learned a new discipline!");
-			return(true);
+			Message(Chat::White, "You have learned a new discipline!");
+			return true;
 		}
 	}
+
 	Message(Chat::Red, "You have learned too many disciplines and can learn no more.");
-	return(false);
+	return false;
 }
 
 bool Client::MemorizeSpellFromItem(uint32 item_id) {
-	const EQ::ItemData *item = database.GetItem(item_id);
-	if(item == nullptr) {
+	const auto& item = database.GetItem(item_id);
+	if (!item) {
 		Message(Chat::Red, "Unable to find the scroll!");
-		LogError("Unable to find scroll id [{}]\n", (unsigned long)item_id);
+		LogError("Unable to find scroll id [{}]", item_id);
 		return false;
 	}
 
@@ -615,43 +750,41 @@ bool Client::MemorizeSpellFromItem(uint32 item_id) {
 		return false;
 	}
 
-	if(!(
-		item->Name[0] == 'S' &&
-		item->Name[1] == 'p' &&
-		item->Name[2] == 'e' &&
-		item->Name[3] == 'l' &&
-		item->Name[4] == 'l' &&
-		item->Name[5] == ':' &&
-		item->Name[6] == ' '
-		)) {
+	const std::string item_name = item->Name;
+
+	if (
+		!Strings::BeginsWith(item_name, "Spell: ") &&
+		!Strings::BeginsWith(item_name, "Song: ")
+	) {
 		Message(Chat::Red, "This item is not a scroll.");
 		SummonItem(item_id);
 		return false;
 	}
-	int player_class = GetClass();
-	uint32 cbit = 1 << (player_class - 1);
-	if(!(item->Classes & cbit)) {
+
+	const auto class_bit = static_cast<uint32>(1 << (GetClass() - 1));
+
+	if (!(item->Classes & class_bit)) {
 		Message(Chat::Red, "Your class cannot learn from this scroll.");
 		SummonItem(item_id);
 		return false;
 	}
 
-	uint32 spell_id = item->Scroll.Effect;
-	if(!IsValidSpell(spell_id)) {
-		Message(Chat::Red, "This scroll contains invalid knowledge.");
+	const auto spell_id = static_cast<uint32>(item->Scroll.Effect);
+	if (!IsValidSpell(spell_id)) {
+		Message(Chat::Red, "This scroll Contains invalid knowledge.");
 		return false;
 	}
 
-	const SPDat_Spell_Struct &spell = spells[spell_id];
-	uint8 level_to_use = spell.classes[player_class - 1];
-	if(level_to_use == 255) {
+	const auto& spell = spells[spell_id];
+	const auto level_to_use = spell.classes[GetClass() - 1];
+	if (level_to_use == 255) {
 		Message(Chat::Red, "Your class cannot learn from this scroll.");
 		SummonItem(item_id);
 		return false;
 	}
 
-	if(level_to_use > GetLevel()) {
-		Message(Chat::Red, "You must be at least level %d to learn this spell.", level_to_use);
+	if (level_to_use > GetLevel()) {
+		Message(Chat::Red, fmt::format("You must be at least level {} to learn this spell.", level_to_use).c_str());
 		SummonItem(item_id);
 		return false;
 	}
@@ -662,19 +795,19 @@ bool Client::MemorizeSpellFromItem(uint32 item_id) {
 			if (next_slot != -1) {
 				ScribeSpell(spell_id, next_slot);
 				return true;
-			}
-			else {
+			} else {
 				Message(
 					Chat::Red,
-					"Unable to scribe spell %s (%i) to spellbook: no more spell book slots available.",
-					((spell_id >= 0 && spell_id < SPDAT_RECORDS) ? spells[spell_id].name : "Out-of-range"),
-					spell_id
+					fmt::format(
+						"Unable to scribe {} ({}) to spellbook, no more spell book slots available.",
+						((spell_id >= 0 && spell_id < SPDAT_RECORDS) ? spells[spell_id].name : "Out-of-range"),
+						spell_id
+					).c_str()
 				);
 				SummonItem(item_id);
 				return false;
 			}
-		}
-		else {
+		} else {
 			Message(Chat::Red, "You already know this spell.");
 			SummonItem(item_id);
 			return false;
@@ -691,7 +824,7 @@ void Client::TrainDiscBySpellID(int32 spell_id)
 	for(i = 0; i < MAX_PP_DISCIPLINES; i++) {
 		if(m_pp.disciplines.values[i] == 0) {
 			m_pp.disciplines.values[i] = spell_id;
-			database.SaveCharacterDisc(this->CharacterID(), i, spell_id);
+			database.SaveCharacterDiscipline(CharacterID(), i, spell_id);
 			SendDisciplineUpdate();
 			Message(Chat::Yellow, "You have learned a new combat ability!");
 			return;
@@ -721,9 +854,16 @@ void Client::SendDisciplineUpdate() {
 
 bool Client::UseDiscipline(uint32 spell_id, uint32 target) {
 	// Dont let client waste a reuse timer if they can't use the disc
-	if (IsStunned() || IsFeared() || IsMezzed() || IsAmnesiad() || IsPet())
+	if ((IsStunned() && !IsCastNotStandingSpell(spell_id))||
+		IsFeared() ||
+		(IsMezzed() && !IsCastNotStandingSpell(spell_id)) ||
+		IsAmnesiad() ||
+		IsPet())
 	{
-		return(false);
+		if (IsAmnesiad()) {
+			MessageString(Chat::Red, MELEE_SILENCE);
+		}
+		return false;
 	}
 
 	//make sure we have the spell...
@@ -733,12 +873,16 @@ bool Client::UseDiscipline(uint32 spell_id, uint32 target) {
 			break;
 	}
 	if(r == MAX_PP_DISCIPLINES)
-		return(false);	//not found.
+		return false;	//not found.
 
 	//make sure we can use it..
 	if(!IsValidSpell(spell_id)) {
-		Message(Chat::Red, "This tome contains invalid knowledge.");
-		return(false);
+		Message(Chat::Red, "This tome Contains invalid knowledge.");
+		return false;
+	}
+
+	if (DivineAura() && !IsCastNotStandingSpell(spell_id)) {
+		return false;
 	}
 
 	//can we use the spell?
@@ -747,18 +891,18 @@ bool Client::UseDiscipline(uint32 spell_id, uint32 target) {
 	if(level_to_use == 255) {
 		Message(Chat::Red, "Your class cannot learn from this tome.");
 		//should summon them a new one...
-		return(false);
+		return false;
 	}
 
 	if(level_to_use > GetLevel()) {
 		MessageString(Chat::Red, DISC_LEVEL_USE_ERROR);
 		//should summon them a new one...
-		return(false);
+		return false;
 	}
 
 	if(GetEndurance() < spell.endurance_cost) {
 		Message(11, "You are too fatigued to use this skill right now.");
-		return(false);
+		return false;
 	}
 
 	// sneak attack discs require you to be hidden for 4 seconds before use
@@ -779,14 +923,15 @@ bool Client::UseDiscipline(uint32 spell_id, uint32 target) {
 			Chat::White,
 			fmt::format(
 				"You can use this discipline in {}.",
-				ConvertSecondsToTime(remaining_time)
+				Strings::SecondsToTime(remaining_time)
 			).c_str()
 		);
 		return false;
 	}
 
-	if(spell.recast_time > 0)
-	{
+	bool instant_recast = true;
+
+	if (spell.recast_time > 0) {
 		uint32 reduced_recast = spell.recast_time / 1000;
 		auto focus = GetFocusEffect(focusReduceRecastTime, spell_id);
 		// do stupid stuff because custom servers.
@@ -797,24 +942,39 @@ bool Client::UseDiscipline(uint32 spell_id, uint32 target) {
 			reduced_recast = 0;
 			if (GetPTimers().Enabled((uint32)DiscTimer))
 				GetPTimers().Clear(&database, (uint32)DiscTimer);
-		} else {
+		}
+		else {
 			reduced_recast -= focus;
 		}
 
-		if (reduced_recast > 0)
-			CastSpell(spell_id, target, EQ::spells::CastingSlot::Discipline, -1, -1, 0, -1, (uint32)DiscTimer, reduced_recast);
-		else{
-			CastSpell(spell_id, target, EQ::spells::CastingSlot::Discipline);
-			return true;
-		}
+		if (reduced_recast > 0) {
+			instant_recast = false;
 
-		SendDisciplineTimer(spells[spell_id].timer_id, reduced_recast);
+			if (GetClass() == Class::Bard && IsCasting() && spells[spell_id].cast_time == 0) {
+				if (DoCastingChecksOnCaster(spell_id, EQ::spells::CastingSlot::Discipline)) {
+					SpellFinished(spell_id, entity_list.GetMob(target), EQ::spells::CastingSlot::Discipline, 0, -1, spells[spell_id].resist_difficulty, false, -1, (uint32)DiscTimer, reduced_recast, false);
+				}
+			}
+			else {
+				if (!CastSpell(spell_id, target, EQ::spells::CastingSlot::Discipline, -1, -1, 0, -1, (uint32)DiscTimer, reduced_recast)) {
+					return false;
+				}
+			}
+			SendDisciplineTimer(spells[spell_id].timer_id, reduced_recast);
+		}
 	}
-	else
-	{
-		CastSpell(spell_id, target, EQ::spells::CastingSlot::Discipline);
+
+	if (instant_recast) {
+		if (GetClass() == Class::Bard && IsCasting() && spells[spell_id].cast_time == 0) {
+			if (DoCastingChecksOnCaster(spell_id, EQ::spells::CastingSlot::Discipline)) {
+				SpellFinished(spell_id, entity_list.GetMob(target), EQ::spells::CastingSlot::Discipline, 0, -1, spells[spell_id].resist_difficulty, false, -1, 0xFFFFFFFF, 0, false);
+			}
+		}
+		else {
+			CastSpell(spell_id, target, EQ::spells::CastingSlot::Discipline);
+		}
 	}
-	return(true);
+	return true;
 }
 
 uint32 Client::GetDisciplineTimer(uint32 timer_id) {
@@ -868,25 +1028,19 @@ void Client::SendDisciplineTimer(uint32 timer_id, uint32 duration)
 	}
 }
 
-/**
- * @param taunter
- * @param range
- * @param bonus_hate
- */
-void EntityList::AETaunt(Client *taunter, float range, int32 bonus_hate)
+void EntityList::AETaunt(Client* taunter, float range, int bonus_hate)
 {
-
-	/**
-	 * Live AE taunt range - Hardcoded.
-	 */
 	if (range == 0) {
 		range = 40;
 	}
 
 	float range_squared = range * range;
 
-	for (auto &it : entity_list.GetCloseMobList(taunter, range)) {
+	for (auto& it: entity_list.GetCloseMobList(taunter, range)) {
 		Mob *them = it.second;
+		if (!them) {
+			continue;
+		}
 
 		if (!them->IsNPC()) {
 			continue;
@@ -897,9 +1051,11 @@ void EntityList::AETaunt(Client *taunter, float range, int32 bonus_hate)
 			z_difference *= -1;
 		}
 
-		if (z_difference < 10
-			&& taunter->IsAttackAllowed(them)
-			&& DistanceSquaredNoZ(taunter->GetPosition(), them->GetPosition()) <= range_squared) {
+		if (
+			z_difference < 10 &&
+			taunter->IsAttackAllowed(them) &&
+			DistanceSquaredNoZ(taunter->GetPosition(), them->GetPosition()) <= range_squared
+		) {
 			if (taunter->CheckLosFN(them)) {
 				taunter->Taunt(them->CastToNPC(), true, 0, true, bonus_hate);
 			}
@@ -907,38 +1063,31 @@ void EntityList::AETaunt(Client *taunter, float range, int32 bonus_hate)
 	}
 }
 
-/**
- * Causes caster to hit every mob within dist range of center with spell_id
- *
- * @param caster_mob
- * @param center_mob
- * @param spell_id
- * @param affect_caster
- * @param resist_adjust
- * @param max_targets
- */
 void EntityList::AESpell(
-	Mob *caster_mob,
-	Mob *center_mob,
+	Mob* caster_mob,
+	Mob* center_mob,
 	uint16 spell_id,
 	bool affect_caster,
 	int16 resist_adjust,
-	int *max_targets
+	int* max_targets,
+	bool is_scripted
 )
 {
-	const auto &cast_target_position =
-				   spells[spell_id].target_type == ST_Ring ?
-					   caster_mob->GetTargetRingLocation() :
-					   static_cast<glm::vec3>(center_mob->GetPosition());
+	const auto& cast_target_position = (
+		(!is_scripted && spells[spell_id].target_type == ST_Ring) ?
+		caster_mob->GetTargetRingLocation() :
+		static_cast<glm::vec3>(center_mob->GetPosition())
+	);
 
-	Mob       *current_mob         = nullptr;
+	Mob* current_mob = nullptr;
+
 	bool      is_detrimental_spell = IsDetrimentalSpell(spell_id);
 	bool      is_npc               = caster_mob->IsNPC();
 	float     distance             = caster_mob->GetAOERange(spell_id);
 	float     distance_squared     = distance * distance;
-	float     min_range2           = spells[spell_id].min_range * spells[spell_id].min_range;
-	glm::vec2 min                  = {cast_target_position.x - distance, cast_target_position.y - distance};
-	glm::vec2 max                  = {cast_target_position.x + distance, cast_target_position.y + distance};
+	float     min_range_squared    = spells[spell_id].min_range * spells[spell_id].min_range;
+	glm::vec2 min                  = { cast_target_position.x - distance, cast_target_position.y - distance };
+	glm::vec2 max                  = { cast_target_position.x + distance, cast_target_position.y + distance };
 
 	/**
 	 * If using Old Rain Targets - there is no max target limitation
@@ -947,17 +1096,18 @@ void EntityList::AESpell(
 		max_targets = nullptr;
 	}
 
-	/**
-	 * Max AOE targets
-	 */
 	int max_targets_allowed = RuleI(Range, AOEMaxTargets); // unlimited
 	if (max_targets) { // rains pass this in since they need to preserve the count through waves
 		max_targets_allowed = *max_targets;
-	}
-	else if (spells[spell_id].aoe_max_targets) {
+	} else if (spells[spell_id].aoe_max_targets) {
 		max_targets_allowed = spells[spell_id].aoe_max_targets;
-	}
-	else if (IsTargetableAESpell(spell_id) && is_detrimental_spell && !is_npc && !IsEffectInSpell(spell_id, SE_Lull) && !IsEffectInSpell(spell_id, SE_Mez)) {
+	} else if (
+		IsTargetableAESpell(spell_id) &&
+		is_detrimental_spell &&
+		!is_npc &&
+		!IsEffectInSpell(spell_id, SE_Lull) &&
+		!IsEffectInSpell(spell_id, SE_Mez)
+	) {
 		max_targets_allowed = 4;
 	}
 
@@ -970,9 +1120,8 @@ void EntityList::AESpell(
 		distance
 	);
 
-	for (auto &it : entity_list.GetCloseMobList(caster_mob, distance)) {
+	for (auto& it: entity_list.GetCloseMobList(caster_mob, distance)) {
 		current_mob = it.second;
-
 		if (!current_mob) {
 			continue;
 		}
@@ -991,7 +1140,7 @@ void EntityList::AESpell(
 			continue;
 		}
 
-		if (spells[spell_id].target_type == ST_AreaClientOnly && !current_mob->IsClient()) {
+		if (spells[spell_id].target_type == ST_AreaClientOnly && !current_mob->IsOfClientBot()) {
 			continue;
 		}
 
@@ -999,18 +1148,11 @@ void EntityList::AESpell(
 			continue;
 		}
 
-		/**
-		 * Check PC / NPC
-		 * 1 = PC
-		 * 2 = NPC
-		 */
-		if (spells[spell_id].pcnpc_only_flag == 1 && !current_mob->IsClient() && !current_mob->IsMerc() &&
-		    !current_mob->IsBot()) {
+		if (spells[spell_id].pcnpc_only_flag == PCNPCOnlyFlagType::PC && !current_mob->IsOfClientBotMerc()) {
 			continue;
 		}
 
-		if (spells[spell_id].pcnpc_only_flag == 2 &&
-		    (current_mob->IsClient() || current_mob->IsMerc() || current_mob->IsBot())) {
+		if (spells[spell_id].pcnpc_only_flag == PCNPCOnlyFlagType::NPC && current_mob->IsOfClientBotMerc()) {
 			continue;
 		}
 
@@ -1024,41 +1166,40 @@ void EntityList::AESpell(
 			continue;
 		}
 
-		if (distance_to_target < min_range2) {
+		if (distance_to_target < min_range_squared) {
 			continue;
 		}
 
-		if (is_npc && current_mob->IsNPC() &&
-			spells[spell_id].target_type != ST_AreaNPCOnly) {    //check npc->npc casting
-			FACTION_VALUE faction_value = current_mob->GetReverseFactionCon(caster_mob);
+		if (
+			is_npc &&
+			current_mob->IsNPC() &&
+			spells[spell_id].target_type != ST_AreaNPCOnly
+		) {
+			const auto faction_value = current_mob->GetReverseFactionCon(caster_mob);
 			if (is_detrimental_spell) {
-				//affect mobs that are on our hate list, or
-				//which have bad faction with us
 				if (
 					!(caster_mob->CheckAggro(current_mob) ||
-					  faction_value == FACTION_THREATENINGLY ||
-					  faction_value == FACTION_SCOWLS)) {
+					faction_value == FACTION_THREATENINGLY ||
+					faction_value == FACTION_SCOWLS)
+				) {
 					continue;
 				}
-			}
-			else {
-				//only affect mobs we would assist.
+			} else {
 				if (!(faction_value <= FACTION_AMIABLY)) {
 					continue;
 				}
 			}
 		}
 
-		/**
-		 * Finally, make sure they are within range
-		 */
 		if (is_detrimental_spell) {
 			if (!caster_mob->IsAttackAllowed(current_mob, true)) {
 				continue;
 			}
+
 			if (center_mob && !spells[spell_id].npc_no_los && !center_mob->CheckLosFN(current_mob)) {
 				continue;
 			}
+
 			if (!center_mob && !spells[spell_id].npc_no_los && !caster_mob->CheckLosFN(
 				caster_mob->GetTargetRingX(),
 				caster_mob->GetTargetRingY(),
@@ -1066,9 +1207,7 @@ void EntityList::AESpell(
 				current_mob->GetSize())) {
 				continue;
 			}
-		}
-		else {
-
+		} else {
 			/**
 			 * Check to stop casting beneficial ae buffs (to wit: bard songs) on enemies...
 			 * This does not check faction for beneficial AE buffs... only agro and attackable.
@@ -1078,6 +1217,7 @@ void EntityList::AESpell(
 			if (caster_mob->IsAttackAllowed(current_mob, true)) {
 				continue;
 			}
+
 			if (caster_mob->CheckAggro(current_mob)) {
 				continue;
 			}
@@ -1104,37 +1244,29 @@ void EntityList::AESpell(
 	}
 }
 
-/**
- * @param caster
- * @param center
- * @param spell_id
- * @param affect_caster
- */
 void EntityList::MassGroupBuff(
-	Mob *caster,
-	Mob *center,
+	Mob* caster,
+	Mob* center,
 	uint16 spell_id,
-	bool affect_caster)
+	bool affect_caster
+)
 {
-	Mob   *current_mob         = nullptr;
+	Mob*  current_mob          = nullptr;
 	float distance             = caster->GetAOERange(spell_id);
 	float distance_squared     = distance * distance;
 	bool  is_detrimental_spell = IsDetrimentalSpell(spell_id);
 
-	for (auto &it : entity_list.GetCloseMobList(caster, distance)) {
+	for (auto& it: entity_list.GetCloseMobList(caster, distance)) {
 		current_mob = it.second;
-
-		/**
-		 * Skip center
-		 */
-		if (current_mob == center) {
+		if (!current_mob) {
 			continue;
 		}
 
-		/**
-		 * Skip self
-		 */
-		if (current_mob == caster && !affect_caster) {
+		if (current_mob == center) { // Skip Center
+			continue;
+		}
+
+		if (current_mob == caster && !affect_caster) { // Skip Caster
 			continue;
 		}
 
@@ -1142,17 +1274,13 @@ void EntityList::MassGroupBuff(
 			continue;
 		}
 
-		/**
-		 * Pets
-		 */
 		if (current_mob->IsNPC()) {
-			Mob *owner = current_mob->GetOwner();
+			Mob* owner = current_mob->GetOwner();
 			if (owner) {
-				if (!owner->IsClient()) {
+				if (!owner->IsOfClientBot()) {
 					continue;
 				}
-			}
-			else {
+			} else {
 				continue;
 			}
 		}
@@ -1165,134 +1293,48 @@ void EntityList::MassGroupBuff(
 	}
 }
 
-/**
- * Causes caster to hit every mob within dist range of center with a bard pulse of spell_id
- * NPC spells will only affect other NPCs with compatible faction
- *
- * @param caster
- * @param center
- * @param spell_id
- * @param affect_caster
- */
-void EntityList::AEBardPulse(
-	Mob *caster,
-	Mob *center,
-	uint16 spell_id,
-	bool affect_caster)
-{
-	Mob   *current_mob         = nullptr;
-	float distance             = caster->GetAOERange(spell_id);
-	float distance_squared     = distance * distance;
-	bool  is_detrimental_spell = IsDetrimentalSpell(spell_id);
-	bool  is_npc               = caster->IsNPC();
-
-	for (auto &it : entity_list.GetCloseMobList(caster, distance)) {
-		current_mob = it.second;
-
-		/**
-		 * Skip self
-		 */
-		if (current_mob == center) {
-			continue;
-		}
-
-		if (current_mob == caster && !affect_caster) {
-			continue;
-		}
-
-		if (DistanceSquared(center->GetPosition(), current_mob->GetPosition()) > distance_squared) {    //make sure they are in range
-			continue;
-		}
-
-		/**
-		 * check npc->npc casting
-		 */
-		if (is_npc && current_mob->IsNPC()) {
-			FACTION_VALUE faction = current_mob->GetReverseFactionCon(caster);
-			if (is_detrimental_spell) {
-				//affect mobs that are on our hate list, or
-				//which have bad faction with us
-				if (!(caster->CheckAggro(current_mob) || faction == FACTION_THREATENINGLY || faction == FACTION_SCOWLS)) {
-					continue;
-				}
-			}
-			else {
-				//only affect mobs we would assist.
-				if (!(faction <= FACTION_AMIABLY)) {
-					continue;
-				}
-			}
-		}
-
-		/**
-		 * LOS
-		 */
-		if (is_detrimental_spell) {
-			if (!center->CheckLosFN(current_mob)) {
-				continue;
-			}
-		}
-		else { // check to stop casting beneficial ae buffs (to wit: bard songs) on enemies...
-			// See notes in AESpell() above for more info.
-			if (caster->IsAttackAllowed(current_mob, true)) {
-				continue;
-			}
-			if (caster->CheckAggro(current_mob)) {
-				continue;
-			}
-		}
-
-		current_mob->BardPulse(spell_id, caster);
-	}
-	if (caster->IsClient()) {
-		caster->CastToClient()->CheckSongSkillIncrease(spell_id);
-	}
-}
-
-/**
- * Rampage - Normal and Duration rampages
- * NPCs handle it differently in Mob::Rampage
- *
- * @param attacker
- * @param distance
- * @param Hand
- * @param count
- * @param is_from_spell
- */
 void EntityList::AEAttack(
-	Mob *attacker,
+	Mob* attacker,
 	float distance,
-	int Hand,
-	int count,
-	bool is_from_spell)
+	int16 slot_id,
+	int hit_count,
+	bool is_from_spell,
+	int attack_rounds
+)
 {
-	Mob   *current_mob     = nullptr;
+	Mob*  current_mob      = nullptr;
 	float distance_squared = distance * distance;
-	int   hit_count        = 0;
+	int   current_hits     = 0;
 
-	for (auto &it : entity_list.GetCloseMobList(attacker, distance)) {
+	for (auto& it: entity_list.GetCloseMobList(attacker, distance)) {
 		current_mob = it.second;
+		if (!current_mob) {
+			continue;
+		}
 
-		if (current_mob->IsNPC()
-			&& current_mob != attacker //this is not needed unless NPCs can use this
-			&& (attacker->IsAttackAllowed(current_mob))
-			&& current_mob->GetRace() != 216 && current_mob->GetRace() != 472 /* dont attack horses */
-			&& (DistanceSquared(current_mob->GetPosition(), attacker->GetPosition()) <= distance_squared)
-			) {
-
-			if (!attacker->IsClient() || attacker->GetClass() == MONK || attacker->GetClass() == RANGER) {
-				attacker->Attack(current_mob, Hand, false, false, is_from_spell);
+		if (
+			current_mob->IsNPC() &&
+			current_mob != attacker &&
+			attacker->IsAttackAllowed(current_mob) &&
+			!current_mob->IsHorse() &&
+			DistanceSquared(current_mob->GetPosition(), attacker->GetPosition()) <= distance_squared
+		) {
+			for (int i = 0; i < attack_rounds; i++) {
+				if (
+					!attacker->IsClient() ||
+					attacker->GetClass() == Class::Monk ||
+					attacker->GetClass() == Class::Ranger
+				) {
+					attacker->Attack(current_mob, slot_id, false, false, is_from_spell);
+				} else {
+					attacker->CastToClient()->DoAttackRounds(current_mob, slot_id, is_from_spell);
+				}
 			}
-			else {
-				attacker->CastToClient()->DoAttackRounds(current_mob, Hand, is_from_spell);
-			}
 
-			hit_count++;
-			if (count != 0 && hit_count >= count) {
+			current_hits++;
+			if (hit_count != 0 && current_hits >= hit_count) {
 				return;
 			}
 		}
 	}
 }
-
-
